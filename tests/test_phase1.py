@@ -165,7 +165,11 @@ class IntegrationTests(HomeTestCase):
 
     def test_cli_init_adapter_generates_hook_marker(self) -> None:
         self.assertEqual(main(["init", "codex"]), 0)
-        self.assertTrue((self.home / "hooks" / "codex-hook.ps1").exists())
+        hook_path = self.home / "hooks" / "codex-hook.ps1"
+        self.assertTrue(hook_path.exists())
+        hook = hook_path.read_text(encoding="utf-8")
+        self.assertIn("Get-Command ai-debt", hook)
+        self.assertIn("python -m ai_debt.cli hook codex", hook)
         self.assertIn("codex: true", (self.home / "config.yaml").read_text(encoding="utf-8"))
 
     def test_config_round_trip_preserves_top_level_thresholds(self) -> None:

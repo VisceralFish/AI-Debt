@@ -5,14 +5,15 @@
 初始化 adapter：
 
 ```bash
-python -m ai_debt.cli init claude-code
-python -m ai_debt.cli init codex
+python -m pip install .
+ai-debt init claude-code
+ai-debt init codex
 ```
 
 真实接入时，把 `~/.ai-debt/hooks/*-hook.ps1` 连接到对应 agent hook。fixture 测试时可直接调用：
 
 ```bash
-python -m ai_debt.cli hook codex
+ai-debt hook codex
 ```
 
 并从 stdin 传入 JSON payload。
@@ -26,33 +27,33 @@ python -m ai_debt.cli hook codex
 生成 review input：
 
 ```bash
-python -m ai_debt.cli review
+ai-debt review
 ```
 
 把当前 agent 生成的结构化 JSON 保存为 `result.json` 后导入：
 
 ```bash
-python -m ai_debt.cli review <session-id> --analysis-file result.json
+ai-debt review <session-id> --analysis-file result.json
 ```
 
 确认候选：
 
 ```bash
-python -m ai_debt.cli review --action accept --candidate-id <candidate-id>
+ai-debt review --action accept --candidate-id <candidate-id>
 ```
 
 ## 4. Learn And Check
 
 ```bash
-python -m ai_debt.cli inbox
-python -m ai_debt.cli learn-one <debt-id>
-python -m ai_debt.cli check <debt-id> --answer "..."
+ai-debt inbox
+ai-debt learn-one <debt-id>
+ai-debt check <debt-id> --answer "..."
 ```
 
 ## 5. Export
 
 ```bash
-python -m ai_debt.cli export deep-review <session-id>
+ai-debt export deep-review <session-id>
 ```
 
 输出位于：

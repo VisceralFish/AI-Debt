@@ -13,7 +13,13 @@ def write_hook_script(adapter: str, home: Path | None = None) -> Path:
         "\n".join(
             [
                 "$payload = [Console]::In.ReadToEnd()",
-                f"$payload | ai-debt hook {adapter}",
+                "$native = Get-Command ai-debt -ErrorAction SilentlyContinue",
+                "if ($native) {",
+                f"  $payload | & $native.Source hook {adapter}",
+                "  exit $LASTEXITCODE",
+                "}",
+                f"$payload | python -m ai_debt.cli hook {adapter}",
+                "exit $LASTEXITCODE",
                 "",
             ]
         ),

@@ -38,10 +38,14 @@ Phase 1, Phase 2, and Phase 3 MVP implementation are in place:
 This project currently uses Python standard library only.
 
 ```bash
-python -m ai_debt.cli init
-python -m ai_debt.cli init claude-code
-python -m ai_debt.cli init codex
+python -m pip install .
+ai-debt init
+ai-debt init claude-code
+ai-debt init codex
 ```
+
+Installing the package exposes the native `ai-debt` console command from the
+script entry point in `pyproject.toml`.
 
 Default local state directory:
 
@@ -58,19 +62,19 @@ Default local state directory:
 ## Common Commands
 
 ```bash
-python -m ai_debt.cli status
-python -m ai_debt.cli doctor
-python -m ai_debt.cli review
-python -m ai_debt.cli review --analysis-file result.json
-python -m ai_debt.cli review --action accept --candidate-id <candidate-id>
-python -m ai_debt.cli inbox
-python -m ai_debt.cli learn-one <debt-id>
-python -m ai_debt.cli check <debt-id> --answer "..."
-python -m ai_debt.cli export deep-review <session-id>
-python -m ai_debt.cli cleanup --dry-run
-python -m ai_debt.cli cleanup
-python -m ai_debt.cli delete session <session-id>
-python -m ai_debt.cli delete debt <debt-id>
+ai-debt status
+ai-debt doctor
+ai-debt review
+ai-debt review --analysis-file result.json
+ai-debt review --action accept --candidate-id <candidate-id>
+ai-debt inbox
+ai-debt learn-one <debt-id>
+ai-debt check <debt-id> --answer "..."
+ai-debt export deep-review <session-id>
+ai-debt cleanup --dry-run
+ai-debt cleanup
+ai-debt delete session <session-id>
+ai-debt delete debt <debt-id>
 ```
 
 ## Review Flow
@@ -78,13 +82,13 @@ python -m ai_debt.cli delete debt <debt-id>
 `ai-debt review` does not call a background LLM. It emits a structured review input package for the current agent. After the current agent generates a structured analysis JSON file, import it with:
 
 ```bash
-python -m ai_debt.cli review <session-id> --analysis-file result.json
+ai-debt review <session-id> --analysis-file result.json
 ```
 
 Only evidence-backed candidates can be accepted into the ledger:
 
 ```bash
-python -m ai_debt.cli review --action accept --candidate-id <candidate-id>
+ai-debt review --action accept --candidate-id <candidate-id>
 ```
 
 ## Privacy Defaults
