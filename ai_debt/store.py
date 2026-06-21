@@ -100,6 +100,21 @@ def recent_sessions(conn: sqlite3.Connection, limit: int = 5) -> list[sqlite3.Ro
     ).fetchall()
 
 
+def list_sessions(conn: sqlite3.Connection, limit: int = 10, status: str | None = None) -> list[sqlite3.Row]:
+    if status:
+        return conn.execute(
+            """
+            SELECT id, source, status, last_activity_at
+            FROM sessions
+            WHERE status = ?
+            ORDER BY last_activity_at DESC
+            LIMIT ?
+            """,
+            (status, limit),
+        ).fetchall()
+    return recent_sessions(conn, limit)
+
+
 def _parse_time(value: str) -> datetime:
     if value.endswith("Z"):
         value = value[:-1] + "+00:00"

@@ -10,6 +10,7 @@ requires-python = ">=3.10"
 
 [project.scripts]
 ai-debt = "ai_debt.cli:main"
+ai-debt-mcp = "ai_debt.mcp_server:main"
 
 [tool.setuptools.packages.find]
 include = ["ai_debt*"]

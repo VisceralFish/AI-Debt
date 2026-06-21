@@ -73,6 +73,22 @@ python -m ai_debt.cli delete session <session-id>
 python -m ai_debt.cli delete debt <debt-id>
 ```
 
+## MCP Server
+
+AI Debt 也提供 MCP stdio server，供支持 MCP tools 的 agent 直接调用：
+
+```bash
+ai-debt-mcp
+```
+
+开发模式可直接运行：
+
+```bash
+python -m ai_debt.mcp_server
+```
+
+工具列表和 Codex flow 见 [MCP Usage](docs/mcp-usage.md)。
+
 ## Review 流程
 
 `ai-debt review` 不会自动调用后台 LLM。它会输出结构化 review input，供当前 agent 生成 analysis JSON。生成后导入：

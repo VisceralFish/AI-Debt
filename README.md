@@ -77,6 +77,22 @@ ai-debt delete session <session-id>
 ai-debt delete debt <debt-id>
 ```
 
+## MCP Server
+
+AI Debt also exposes an MCP stdio server for agents that can call MCP tools directly:
+
+```bash
+ai-debt-mcp
+```
+
+Development mode:
+
+```bash
+python -m ai_debt.mcp_server
+```
+
+See [MCP Usage](docs/mcp-usage.md) for the tool list and Codex flow.
+
 ## Review Flow
 
 `ai-debt review` does not call a background LLM. It emits a structured review input package for the current agent. After the current agent generates a structured analysis JSON file, import it with:
