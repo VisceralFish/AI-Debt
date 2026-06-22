@@ -41,17 +41,18 @@ pending_minutes: 30
   review_window.status -> pending_ownership_review
 ```
 
-当前实现没有后台定时器。idle / pending 状态是 lazy 刷新的，必须由一次命令或 MCP tool call 触发：
+idle / pending 状态可以 lazy 刷新，也可以由本地 companion watcher 主动刷新。会触发刷新的是：
 
 ```text
 ai-debt status
 ai-debt review
+ai-debt companion
 MCP get_status
 MCP list_sessions
 MCP record_event
 ```
 
-如果用户没有显式 Stop/SessionEnd，agent 或 MCP client 应在空闲后先调用 `get_status` 或 `list_sessions`，再调用 `get_pending_review_window`。
+如果运行 `ai-debt companion`，它每 30 秒检查一次，发现新的 `pending_settlement` 后打印一次本地提醒，但不会自动调用 LLM 或生成 review candidates。未运行 companion 时，如果用户没有显式 Stop/SessionEnd，agent 或 MCP client 应在空闲后先调用 `get_status` 或 `list_sessions`，再调用 `get_pending_review_window`。
 
 数据库丢失时会从 `journals/*/events.jsonl` 恢复 normalized events 和 review window。
 

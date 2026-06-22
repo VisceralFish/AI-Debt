@@ -101,6 +101,7 @@ def schema_is_valid(conn: sqlite3.Connection) -> bool:
         "ownership_concepts",
         "review_actions",
         "grasp_checks",
+        "companion_notifications",
     }
     rows = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
     return required.issubset({row["name"] for row in rows})

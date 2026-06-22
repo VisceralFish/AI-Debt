@@ -6,10 +6,12 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from io import BytesIO
+from io import StringIO
 from pathlib import Path
 
 from ai_debt import mcp_server
 from ai_debt.cli import main
+from ai_debt.companion import run_companion_once
 from ai_debt.config import default_config
 from ai_debt.core import capture_payload
 from ai_debt.maintenance import cleanup_raw_payloads, delete_debt, delete_session, export_task_control_report, schema_is_valid
@@ -149,7 +151,16 @@ class OwnershipCoreTests(HomeTestCase):
             migrate(conn)
             self.assertTrue(schema_is_valid(conn))
             tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
-            self.assertTrue({"ownership_profiles", "ownership_review_windows", "ownership_gap_candidates", "ownership_debts", "ownership_concepts"}.issubset(tables))
+            self.assertTrue(
+                {
+                    "ownership_profiles",
+                    "ownership_review_windows",
+                    "ownership_gap_candidates",
+                    "ownership_debts",
+                    "ownership_concepts",
+                    "companion_notifications",
+                }.issubset(tables)
+            )
         finally:
             conn.close()
 
@@ -194,6 +205,28 @@ class OwnershipCoreTests(HomeTestCase):
             self.assertEqual(window["status"], "pending_ownership_review")
         finally:
             conn.close()
+
+    def test_companion_once_notifies_pending_settlement_once(self) -> None:
+        capture_payload(
+            "codex",
+            {
+                "event": "SessionStart",
+                "session_id": "companion-session",
+                "cwd": str(self.home),
+                "timestamp": "2026-06-22T00:00:00Z",
+            },
+            self.home,
+        )
+        output = StringIO()
+        first = run_companion_once(self.home, datetime(2026, 6, 22, 0, 31, tzinfo=timezone.utc), output)
+        second_output = StringIO()
+        second = run_companion_once(self.home, datetime(2026, 6, 22, 0, 32, tzinfo=timezone.utc), second_output)
+
+        self.assertEqual([item.session_id for item in first], ["companion-session"])
+        self.assertIn("AI Debt: review ready", output.getvalue())
+        self.assertIn("run: ai-debt review", output.getvalue())
+        self.assertEqual(second, [])
+        self.assertEqual(second_output.getvalue(), "")
 
     def test_analysis_creates_candidates_and_accept_indexes_concepts(self) -> None:
         window_id = self.capture_codex_window()

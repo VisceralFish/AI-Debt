@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 
+from .companion import COMPANION_POLL_SECONDS, run_companion_loop, run_companion_once
 from .config import load_config, mark_adapter
 from .core import capture_payload, initialize, read_json_stdin
 from .hooks import write_hook_script
@@ -42,6 +43,9 @@ def main(argv: list[str] | None = None) -> int:
 
     subparsers.add_parser("status")
     subparsers.add_parser("doctor")
+
+    companion_parser = subparsers.add_parser("companion")
+    companion_parser.add_argument("--once", action="store_true")
 
     hook_parser = subparsers.add_parser("hook")
     hook_parser.add_argument("adapter", choices=["claude-code", "codex"])
@@ -84,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
             return _status()
         if args.command == "doctor":
             return _doctor()
+        if args.command == "companion":
+            return _companion(args.once)
         if args.command == "hook":
             return _hook(args.adapter)
         if args.command == "review":
@@ -177,6 +183,18 @@ def _doctor() -> int:
     if hook_event:
         print(f"last hook: {hook_event['source']} {hook_event['type']} {hook_event['session_id']} {hook_event['occurred_at']}")
     return exit_code
+
+
+def _companion(once: bool) -> int:
+    if once:
+        run_companion_once(output=sys.stdout)
+        return 0
+    print(f"AI Debt companion watching every {COMPANION_POLL_SECONDS}s. Press Ctrl+C to stop.")
+    try:
+        run_companion_loop(output=sys.stdout)
+    except KeyboardInterrupt:
+        print("AI Debt companion stopped.")
+    return 0
 
 
 def _hook(adapter: str) -> int:

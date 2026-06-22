@@ -54,13 +54,14 @@ delete_item
 
 ## Idle Timeout
 
-MCP server 当前没有后台定时器。Idle timeout 由状态读取或事件写入时顺便刷新：
+MCP server 本身没有后台定时器。Idle timeout 可以由状态读取、事件写入，或本地 `ai-debt companion` watcher 刷新：
 
 ```text
 record_event 记录事件后会刷新状态
 get_status 会刷新状态
 list_sessions 会刷新状态
 get_pending_review_window 只读取当前状态，不主动刷新
+ai-debt companion 每 30 秒主动刷新一次状态
 ```
 
 默认阈值：
@@ -72,7 +73,7 @@ pending_minutes: 30
 
 无活动满 15 分钟后，下一次 `get_status` / `list_sessions` 会把 session 和 review window 标为 `idle_detected`。无活动满 30 分钟后，下一次刷新会把 session 标为 `pending_settlement`，并把 review window 标为 `pending_ownership_review`。
 
-如果 agent 没有发送 `SessionEnd`，推荐 MCP flow 是：
+如果 agent 没有发送 `SessionEnd`，且没有运行 `ai-debt companion`，推荐 MCP flow 是：
 
 ```text
 1. 等待空闲超过 pending_minutes

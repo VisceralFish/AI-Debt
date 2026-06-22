@@ -90,16 +90,17 @@ idle_minutes: 15
 pending_minutes: 30
 ```
 
-当前实现没有后台定时器。Idle / pending 状态是 lazy 刷新的：
+MCP server 本身没有后台定时器。Idle / pending 状态可以 lazy 刷新，也可以由本地 `ai-debt companion` watcher 主动刷新：
 
 ```text
 MCP get_status / list_sessions 会刷新 session 和 review window 状态。
 MCP record_event 在记录事件后会刷新一次状态。
 CLI status / review 会刷新状态。
+CLI companion 每 30 秒主动刷新状态。
 get_pending_review_window 本身只读取当前状态，不主动刷新。
 ```
 
-因此，如果没有显式 `session_ended`，agent 或 MCP client 应在空闲后先调用 `get_status` 或 `list_sessions`，再调用 `get_pending_review_window`。
+因此，如果没有显式 `session_ended`，且没有运行 `ai-debt companion`，agent 或 MCP client 应在空闲后先调用 `get_status` 或 `list_sessions`，再调用 `get_pending_review_window`。
 
 ## 4. Ownership Profile
 

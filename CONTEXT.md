@@ -37,7 +37,7 @@ The analysis unit for ownership review. A session is only the capture container;
 _Avoid_: Treating an entire session as one task by default
 
 **Idle Timeout**:
-A lazy review trigger. There is no background timer. State changes happen when `get_status`, `list_sessions`, `ai-debt status`, `ai-debt review`, or `record_event` refreshes session state.
+A review trigger that can be refreshed lazily or by the local companion watcher. State changes happen when `get_status`, `list_sessions`, `ai-debt status`, `ai-debt review`, `record_event`, or `ai-debt companion` refreshes session state.
 
 Default thresholds:
 
@@ -47,6 +47,7 @@ pending_minutes: 30
 ```
 
 After 15 inactive minutes, the session and current review window become `idle_detected`. After 30 inactive minutes, the session becomes `pending_settlement` and the review window becomes `pending_ownership_review`.
+`ai-debt companion` checks every 30 seconds and prints a one-time local reminder for new `pending_settlement` sessions; it does not generate review candidates.
 _Avoid_: Presenting idle timeout as proof that the task truly ended
 
 **Build Journal**:

@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def connect(path: Path) -> sqlite3.Connection:
@@ -182,6 +182,15 @@ def migrate(conn: sqlite3.Connection) -> None:
           user_override TEXT,
           skipped INTEGER NOT NULL DEFAULT 0,
           created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS companion_notifications (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          notified_at TEXT NOT NULL,
+          UNIQUE(session_id, event_type),
+          FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
         );
 
         """

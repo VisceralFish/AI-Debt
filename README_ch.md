@@ -104,7 +104,13 @@ python -m ai_debt.cli review <review-window-id> --analysis-file result.json
 python -m ai_debt.cli review --action accept --candidate-id <candidate-id>
 ```
 
-Idle timeout 是 lazy 刷新，不是后台定时器。默认阈值是 `idle_minutes: 15` 和 `pending_minutes: 30`。`get_status`、`list_sessions`、`ai-debt status`、`ai-debt review` 和 `record_event` 会刷新 session/window 状态；`get_pending_review_window` 只读取当前状态。如果没有 `SessionEnd` 事件，agent 或 MCP client 应在空闲后先调用 `get_status` 或 `list_sessions`，再请求 pending review window。
+Idle timeout 可以 lazy 刷新，也可以由本地 companion watcher 主动刷新。默认阈值是 `idle_minutes: 15` 和 `pending_minutes: 30`。`get_status`、`list_sessions`、`ai-debt status`、`ai-debt review` 和 `record_event` 会刷新 session/window 状态；`get_pending_review_window` 只读取当前状态。要让 timeout 主动发生，可以运行：
+
+```bash
+ai-debt companion
+```
+
+Companion 每 30 秒检查一次，把冷却完成的 session 推进到 `pending_settlement`，并只打印一次本地提醒让用户运行 `ai-debt review`。它不会自动调用 LLM，也不会自动生成 review candidates。
 
 ## 隐私默认值
 
