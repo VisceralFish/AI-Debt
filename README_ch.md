@@ -104,6 +104,8 @@ python -m ai_debt.cli review <review-window-id> --analysis-file result.json
 python -m ai_debt.cli review --action accept --candidate-id <candidate-id>
 ```
 
+Idle timeout 是 lazy 刷新，不是后台定时器。默认阈值是 `idle_minutes: 15` 和 `pending_minutes: 30`。`get_status`、`list_sessions`、`ai-debt status`、`ai-debt review` 和 `record_event` 会刷新 session/window 状态；`get_pending_review_window` 只读取当前状态。如果没有 `SessionEnd` 事件，agent 或 MCP client 应在空闲后先调用 `get_status` 或 `list_sessions`，再请求 pending review window。
+
 ## 隐私默认值
 
 AI Debt 默认 local-first：

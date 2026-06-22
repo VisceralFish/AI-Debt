@@ -52,6 +52,35 @@ delete_item
 11. export_task_control_report(review_window_id)
 ```
 
+## Idle Timeout
+
+MCP server 当前没有后台定时器。Idle timeout 由状态读取或事件写入时顺便刷新：
+
+```text
+record_event 记录事件后会刷新状态
+get_status 会刷新状态
+list_sessions 会刷新状态
+get_pending_review_window 只读取当前状态，不主动刷新
+```
+
+默认阈值：
+
+```text
+idle_minutes: 15
+pending_minutes: 30
+```
+
+无活动满 15 分钟后，下一次 `get_status` / `list_sessions` 会把 session 和 review window 标为 `idle_detected`。无活动满 30 分钟后，下一次刷新会把 session 标为 `pending_settlement`，并把 review window 标为 `pending_ownership_review`。
+
+如果 agent 没有发送 `SessionEnd`，推荐 MCP flow 是：
+
+```text
+1. 等待空闲超过 pending_minutes
+2. get_status()
+3. get_pending_review_window()
+4. get_ownership_review_input(review_window_id)
+```
+
 ## Resources
 
 ```text

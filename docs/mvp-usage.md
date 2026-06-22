@@ -22,6 +22,37 @@ ai-debt hook codex
 
 `session_ended` 会把当前 open review window 推到 `pending_ownership_review`。缺少 Stop/SessionEnd 时，`status` 会按 idle 阈值刷新；idle timeout 是 review 触发器，不代表任务真实结束。
 
+默认阈值：
+
+```text
+idle_minutes: 15
+pending_minutes: 30
+```
+
+状态变化：
+
+```text
+无活动 >= 15 分钟:
+  session.status -> idle_detected
+  review_window.status -> idle_detected
+
+无活动 >= 30 分钟:
+  session.status -> pending_settlement
+  review_window.status -> pending_ownership_review
+```
+
+当前实现没有后台定时器。idle / pending 状态是 lazy 刷新的，必须由一次命令或 MCP tool call 触发：
+
+```text
+ai-debt status
+ai-debt review
+MCP get_status
+MCP list_sessions
+MCP record_event
+```
+
+如果用户没有显式 Stop/SessionEnd，agent 或 MCP client 应在空闲后先调用 `get_status` 或 `list_sessions`，再调用 `get_pending_review_window`。
+
 数据库丢失时会从 `journals/*/events.jsonl` 恢复 normalized events 和 review window。
 
 ## 3. Ownership Review

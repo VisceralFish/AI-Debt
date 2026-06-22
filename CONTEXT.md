@@ -1,85 +1,94 @@
 # AI Debt
 
-AI Debt is a product context for managing the understanding gap created during AI-assisted build sessions. The glossary keeps product language centered on the user's grasp, not on code quality scoring.
+AI Debt is a local-first ownership debt system for AI-assisted build sessions. Product language should stay centered on project control points the user remains responsible for, not on generic code quality scoring or raw AI contribution counts.
 
 ## Language
 
-**Cognitive Debt**:
-A gap in the user's understanding, judgment, or maintainability confidence after accepting AI-generated code, designs, explanations, fixes, or decisions.
-_Avoid_: Technical debt, learning debt, understanding debt
+**Ownership Debt**:
+An evidence-backed gap where an AI agent touched a project control point that remains inside the user's responsibility boundary.
+_Avoid_: Generic technical debt, raw AI contribution, standalone learning debt
 
-**CognitiveDebtItem**:
-A ledger item that records one evidence-backed instance of cognitive debt, including its concept, source session, priority, status, and debt dimension.
-_Avoid_: Intent debt item, learning item, debt card
+**Ownership Gap**:
+A candidate control gap found in a review window before the user decides whether to accept it into the ledger.
+_Avoid_: Unverified ledger item, automatic debt
 
-**Debt Dimension**:
-A classification inside a `CognitiveDebtItem` that names what kind of understanding gap exists, such as concept, code, architecture, tool, debug, intent, maintenance, or verification.
-_Avoid_: Separate debt type, standalone product object
+**Ownership Debt Ledger**:
+The durable state store for accepted ownership debts, concepts, checks, evidence references, and review actions.
+_Avoid_: Raw journal, transcript store, learning inbox as a separate system
 
-**Intent Debt**:
-The intent dimension of cognitive debt, where the user has accepted a design decision or trade-off without understanding the rationale, rejected alternatives, assumptions, or failure conditions.
-_Avoid_: Standalone intent debt object
+**Concept Ownership Gap**:
+An ownership gap where the recovery task is primarily conceptual: the user needs enough understanding of a concept, tool, dependency, or architectural idea to own the related project control point.
+_Avoid_: Separate cognitive debt system
 
-**Terminal Companion**:
-A command-driven terminal surface for showing AI Debt state through status lines, bubbles, and TUI cards while keeping the cognitive debt ledger as the source of truth.
-_Avoid_: Pet, desktop pet, floating companion
+**Control Point**:
+The specific project decision, behavior, boundary, data flow, validation rule, dependency, or operational responsibility that the user may need to own.
+_Avoid_: Vague topic, file name only
+
+**Ownership Profile**:
+A project-scoped configuration containing role, project intent, target ownership level, critical areas, unacceptable risks, and the control contract.
+_Avoid_: Skill test, generic onboarding quiz
+
+**Control Contract**:
+The project-specific rule set describing what AI may handle freely, what AI must explain, what AI must confirm, and what the user must own.
+_Avoid_: Static prompt text only
+
+**Review Window**:
+The analysis unit for ownership review. A session is only the capture container; review windows define the bounded set of events and evidence to analyze.
+_Avoid_: Treating an entire session as one task by default
+
+**Idle Timeout**:
+A lazy review trigger. There is no background timer. State changes happen when `get_status`, `list_sessions`, `ai-debt status`, `ai-debt review`, or `record_event` refreshes session state.
+
+Default thresholds:
+
+```text
+idle_minutes: 15
+pending_minutes: 30
+```
+
+After 15 inactive minutes, the session and current review window become `idle_detected`. After 30 inactive minutes, the session becomes `pending_settlement` and the review window becomes `pending_ownership_review`.
+_Avoid_: Presenting idle timeout as proof that the task truly ended
 
 **Build Journal**:
-An append-only record of raw AI build events, transcript references, event summaries, and project snapshots used for evidence, recovery, and later cognitive debt analysis.
-_Avoid_: Full transcript copy, chat export
+An append-only record of raw AI build events, transcript references, event summaries, and project snapshots used for evidence, recovery, and later ownership analysis.
+_Avoid_: Full transcript copy, permanent raw payload archive
 
 **Raw Payload**:
 The original hook event payload kept temporarily for adapter debugging and evidence traceability before being reduced to normalized events and evidence references.
 _Avoid_: Permanent transcript archive, source of truth
 
-**Debt Ledger**:
-The durable state store for cognitive debt items, inbox entries, review actions, and grasp check results.
-_Avoid_: Raw journal, transcript store
+**Evidence Gate**:
+A deterministic rule that decides whether an agent-proposed ownership gap has enough traceable event, diff, transcript, or file evidence to become a reviewable candidate.
+_Avoid_: Full scoring engine, subjective quality judgment
 
-**Pending Settlement**:
-A session state indicating that a build journal has cooled down and is ready for user-triggered LLM analysis, but no review has been generated yet.
-_Avoid_: Pending review
-
-**Review Command**:
-The command-driven entry point that settles the most recent pending session by default, or asks the user to choose when multiple pending sessions exist.
-_Avoid_: Automatic review, background analysis
-
-**Debt Candidate**:
-An LLM-proposed cognitive debt item that has passed evidence checks but has not yet been accepted into the ledger by the user.
-_Avoid_: Ledger item, confirmed debt
+**Ownership Analysis**:
+The structured JSON generated by the active AI coding agent for a review window. It proposes task context and ownership gaps; AI Debt validates, ranks, deduplicates, and persists candidates.
+_Avoid_: Background automatic LLM analysis
 
 **Review Action**:
-A user's decision on a debt candidate, such as accepting it into the ledger, skipping it, marking it as already known, or opening learn-one.
+The user's decision on an ownership gap candidate: `accept`, `ignore`, `already_know`, or `defer`.
 _Avoid_: Grasp check result, debt status
 
 **Learn One**:
-A short L2 learning flow focused on one debt candidate or ledger item, used before or after the item is accepted into the ledger.
-_Avoid_: Full course, deep review
+A focused ownership recovery task for one accepted debt or candidate. It can be concept-oriented, debugging-oriented, design-oriented, validation-oriented, or assurance-oriented depending on the gap type and required level.
+_Avoid_: Full course, generic learning path
 
-**Grasp Check**:
-A skippable quick check that follows learn-one by default and updates understanding status only when the user chooses to answer.
+**Check**:
+A recovery check that records the user's answer plus optional agent assessment and user override. Without agent assessment or override, it records progress rather than pretending to verify mastery by word count.
 _Avoid_: Mandatory quiz, production readiness gate
 
-**Deep Review Export**:
-A Markdown-only L3 output for deeper review that is generated as an artifact rather than handled as an interactive TUI flow.
-_Avoid_: Interactive L3, learning path
+**Task Control Report**:
+A Markdown and JSON artifact for one review window, containing task context, top ownership gaps, deferred/ignored candidates, accepted debts, recovery tasks, and evidence.
+_Avoid_: Old Deep Review Export terminology
 
 **Agent Adapter**:
 A primary integration layer that converts a supported AI coding tool's hook payloads, tool events, session metadata, and transcript references into AI Debt's normalized build events.
 _Avoid_: Plugin, client-specific core logic
 
 **Primary Adapter**:
-A supported adapter that must pass the same core capture, recovery, review, and ledger contract tests as every other primary adapter.
+A supported adapter that must pass the same core capture, recovery, ownership review, and ledger contract tests as every other primary adapter.
 _Avoid_: Beta adapter, best-effort integration
 
-**LLM-based Analyzer**:
-The analysis layer that reuses the active AI coding agent's model context to propose cognitive debt candidates, reviews, learn-one explanations, and grasp checks while respecting deterministic evidence gates.
-_Avoid_: Pure static analyzer, rule-only scorer
-
-**Evidence Gate**:
-A small deterministic rule that decides whether an LLM-proposed cognitive debt item has enough traceable support to enter the ledger.
-_Avoid_: Debt scoring engine, full heuristic analyzer
-
-**Status Line**:
-A minimal hook-time notification that reports AI Debt state without opening an interactive review or inserting a TUI card.
-_Avoid_: Pop-up, active review, companion bubble
+**MCP Server**:
+The primary product entry point. Agents use MCP tools to record events, query status, get review input, submit ownership analysis, apply review actions, learn, check, export reports, clean up raw payloads, and delete local items.
+_Avoid_: Treating CLI as the main product surface

@@ -108,6 +108,8 @@ Only evidence-backed ownership gap candidates can be accepted into the ledger:
 ai-debt review --action accept --candidate-id <candidate-id>
 ```
 
+Idle timeout is lazy, not a background timer. Defaults are `idle_minutes: 15` and `pending_minutes: 30`. `get_status`, `list_sessions`, `ai-debt status`, `ai-debt review`, and `record_event` refresh session/window states; `get_pending_review_window` only reads the current state. If no `SessionEnd` event arrives, call `get_status` or `list_sessions` after the idle window before asking for the pending review window.
+
 ## Privacy Defaults
 
 AI Debt is local-first by default:

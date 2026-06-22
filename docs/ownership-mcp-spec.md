@@ -27,6 +27,7 @@ Agent / MCP client
 MCP 是主入口，CLI 是备份入口。
 Agent 负责主要语义判断，AI Debt 负责证据、窗口、profile、校验、排序、持久化。
 Idle timeout 是 review 触发器，不是任务真实结束证明。
+Idle timeout 由状态刷新触发，不是后台常驻 timer。
 Ownership analysis 绑定 review window，不直接绑定整个 session。
 Concept learning 并入 Ownership Debt，不作为第二套账本。
 Candidate 和 accepted debt 分开。
@@ -73,13 +74,32 @@ tool_used / assistant_stopped:
   更新 ended_event_id
 
 idle timeout / pending timeout:
-  当前 open window 进入 pending_ownership_review
+  无活动 >= idle_minutes 时，当前 open window 进入 idle_detected
+  无活动 >= pending_minutes 时，当前 open/idle window 进入 pending_ownership_review
 
 session_ended:
   当前 open window 进入 pending_ownership_review
 ```
 
 如果 candidates 已生成后用户继续工作，旧 window 的证据范围不变，新事件进入新的 open window。
+
+当前默认阈值来自 `config.yaml`，未配置时使用：
+
+```text
+idle_minutes: 15
+pending_minutes: 30
+```
+
+当前实现没有后台定时器。Idle / pending 状态是 lazy 刷新的：
+
+```text
+MCP get_status / list_sessions 会刷新 session 和 review window 状态。
+MCP record_event 在记录事件后会刷新一次状态。
+CLI status / review 会刷新状态。
+get_pending_review_window 本身只读取当前状态，不主动刷新。
+```
+
+因此，如果没有显式 `session_ended`，agent 或 MCP client 应在空闲后先调用 `get_status` 或 `list_sessions`，再调用 `get_pending_review_window`。
 
 ## 4. Ownership Profile
 
