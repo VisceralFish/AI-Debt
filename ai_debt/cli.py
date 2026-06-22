@@ -14,20 +14,20 @@ from .maintenance import (
     cleanup_raw_payloads,
     delete_debt,
     delete_session,
-    export_deep_review,
+    export_task_control_report,
     last_hook_event,
     raw_payload_cleanup_summary,
     schema_is_valid,
 )
-from .review import (
-    apply_review_action,
-    build_review_input,
-    create_candidates,
+from .ownership import (
+    build_ownership_review_input,
+    create_ownership_candidates,
     learn_one,
-    list_inbox,
-    parse_analysis,
-    record_grasp_check,
-    select_review_session,
+    list_ownership_debts,
+    parse_ownership_analysis,
+    record_check,
+    review_ownership_gap,
+    select_pending_review_window,
 )
 from .schema import connect, migrate
 from .store import recent_sessions, refresh_session_states, status_counts
@@ -47,9 +47,9 @@ def main(argv: list[str] | None = None) -> int:
     hook_parser.add_argument("adapter", choices=["claude-code", "codex"])
 
     review_parser = subparsers.add_parser("review")
-    review_parser.add_argument("session_id", nargs="?")
+    review_parser.add_argument("review_window_id", nargs="?")
     review_parser.add_argument("--analysis-file")
-    review_parser.add_argument("--action", choices=["accept", "skip", "already_know"])
+    review_parser.add_argument("--action", choices=["accept", "ignore", "already_know", "defer"])
     review_parser.add_argument("--candidate-id")
 
     subparsers.add_parser("inbox")
@@ -60,6 +60,8 @@ def main(argv: list[str] | None = None) -> int:
     check_parser = subparsers.add_parser("check")
     check_parser.add_argument("debt_id")
     check_parser.add_argument("--answer")
+    check_parser.add_argument("--assessment-file")
+    check_parser.add_argument("--override", choices=["partial", "verified", "needs_followup"])
     check_parser.add_argument("--skip", action="store_true")
 
     cleanup_parser = subparsers.add_parser("cleanup")
@@ -70,8 +72,8 @@ def main(argv: list[str] | None = None) -> int:
     delete_parser.add_argument("id")
 
     export_parser = subparsers.add_parser("export")
-    export_parser.add_argument("kind", choices=["deep-review"])
-    export_parser.add_argument("session_id", nargs="?")
+    export_parser.add_argument("kind", choices=["task-control"])
+    export_parser.add_argument("review_window_id", nargs="?")
 
     args = parser.parse_args(argv)
 
@@ -85,19 +87,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "hook":
             return _hook(args.adapter)
         if args.command == "review":
-            return _review(args.session_id, args.analysis_file, args.action, args.candidate_id)
+            return _review(args.review_window_id, args.analysis_file, args.action, args.candidate_id)
         if args.command == "inbox":
             return _inbox()
         if args.command == "learn-one":
             return _learn_one(args.item_id)
         if args.command == "check":
-            return _check(args.debt_id, args.answer, args.skip)
+            return _check(args.debt_id, args.answer, args.assessment_file, args.override, args.skip)
         if args.command == "cleanup":
             return _cleanup(args.dry_run)
         if args.command == "delete":
             return _delete(args.target, args.id)
         if args.command == "export":
-            return _export(args.kind, args.session_id)
+            return _export(args.kind, args.review_window_id)
     except Exception as exc:
         print(f"ai-debt error: {exc}", file=sys.stderr)
         return 1
@@ -189,7 +191,7 @@ def _hook(adapter: str) -> int:
     return 0
 
 
-def _review(session_id: str | None, analysis_file: str | None, action: str | None, candidate_id: str | None) -> int:
+def _review(review_window_id: str | None, analysis_file: str | None, action: str | None, candidate_id: str | None) -> int:
     initialize()
     config = load_config()
     conn = connect(db_path())
@@ -199,32 +201,32 @@ def _review(session_id: str | None, analysis_file: str | None, action: str | Non
         if action:
             if not candidate_id:
                 raise ValueError("--candidate-id is required with --action")
-            debt_id = apply_review_action(conn, candidate_id, action)
+            debt_id = review_ownership_gap(conn, candidate_id, action)
             print(f"review action recorded: {action}")
             if debt_id:
                 print(f"debt_id: {debt_id}")
             return 0
 
-        session = select_review_session(conn, session_id)
-        if session is None:
-            print("no sessions ready for review")
+        window = select_pending_review_window(conn, review_window_id)
+        if window is None:
+            print("no ownership review windows ready")
             return 0
 
         if analysis_file:
             raw_analysis = Path(analysis_file).read_text(encoding="utf-8")
             try:
-                analysis = parse_analysis(raw_analysis)
+                analysis = parse_ownership_analysis(raw_analysis)
             except ValueError as exc:
                 failed_path = _write_failed_review_output(raw_analysis)
                 raise ValueError(f"{exc}; raw output saved to {failed_path}") from exc
-            created = create_candidates(conn, session["id"], analysis)
-            print(f"review candidates created for session {session['id']}: {len(created)}")
+            created = create_ownership_candidates(conn, window["id"], analysis)
+            print(f"ownership candidates created for window {window['id']}: {len(created)}")
             for item in created:
                 reason_text = f" ({'; '.join(item['gate_reasons'])})" if item["gate_reasons"] else ""
                 print(f"- {item['id']}: {item['status']}{reason_text}")
             return 0
 
-        print(json.dumps(build_review_input(conn, session["id"]), ensure_ascii=False, indent=2))
+        print(json.dumps(build_ownership_review_input(conn, window["id"]), ensure_ascii=False, indent=2))
         return 0
     finally:
         conn.close()
@@ -234,15 +236,15 @@ def _inbox() -> int:
     initialize()
     conn = connect(db_path())
     try:
-        rows = list_inbox(conn)
+        rows = list_ownership_debts(conn, status="open")
     finally:
         conn.close()
     if not rows:
         print("inbox is empty")
         return 0
-    print("AI Debt inbox")
+    print("AI Debt ownership inbox")
     for row in rows:
-        print(f"- {row['debt_id']} [{row['priority']}] {row['status']} {row['concept']} ({row['debt_dimension']})")
+        print(f"- {row['id']} [{row['priority']}] {row['status']} {row['title']} ({row['gap_type']})")
     return 0
 
 
@@ -253,21 +255,27 @@ def _learn_one(item_id: str | None) -> int:
         item = learn_one(conn, item_id)
     finally:
         conn.close()
-    print(f"Learn One: {item['concept']}")
+    print(f"Learn One: {item['title']}")
     print(f"id: {item['id']}")
     print(f"kind: {item['kind']}")
+    print(f"required level: {item['required_level']}")
+    print(f"control point: {item['control_point']}")
     print(f"short explanation: {item['short_explanation']}")
     print(f"why it matters: {item['why_it_matters']}")
     print(f"minimal trace: {item['minimal_trace']}")
-    print(f"quick check: {item['quick_check_prompt']}")
+    print(f"recovery task: {item['repayment_task']}")
+    print(f"quick check: {item['check_prompt']}")
     return 0
 
 
-def _check(debt_id: str, answer: str | None, skip: bool) -> int:
+def _check(debt_id: str, answer: str | None, assessment_file: str | None, user_override: str | None, skip: bool) -> int:
     initialize()
+    assessment = None
+    if assessment_file:
+        assessment = json.loads(Path(assessment_file).read_text(encoding="utf-8"))
     conn = connect(db_path())
     try:
-        result = record_grasp_check(conn, debt_id, answer, skipped=skip)
+        result = record_check(conn, debt_id, answer, assessment, user_override, skipped=skip)
     finally:
         conn.close()
     print(f"grasp check: {result}")
@@ -300,16 +308,16 @@ def _delete(target: str, item_id: str) -> int:
     return 0
 
 
-def _export(kind: str, session_id: str | None) -> int:
+def _export(kind: str, review_window_id: str | None) -> int:
     initialize()
-    if kind != "deep-review":
+    if kind != "task-control":
         raise ValueError(f"Unsupported export kind: {kind}")
     conn = connect(db_path())
     try:
-        path = export_deep_review(conn, session_id)
+        path = export_task_control_report(conn, review_window_id)
     finally:
         conn.close()
-    print(f"deep review exported: {path}")
+    print(f"task control report exported: {path}")
     return 0
 
 

@@ -2,7 +2,7 @@
 
 # AI Debt 中文说明
 
-AI Debt 是一个 local-first 的 AI-assisted build 认知债账本。它帮助 AI Builder 看清 AI agent 代自己完成了哪些判断、哪些决策需要复盘，以及哪些已确认的理解缺口应该进入学习或维护队列。
+AI Debt 是一个 local-first 的 AI-assisted build 控制权债账本。它帮助 AI Builder 看清 AI agent 触碰了哪些项目控制点，哪些 Ownership Gap 需要复盘，哪些已确认缺口应该进入恢复任务。
 
 MVP 覆盖完整闭环：
 
@@ -11,27 +11,28 @@ Claude Code / Codex Hook
   -> Agent Adapter
   -> Normalized AgentEvent
   -> Build Journal
-  -> pending_settlement
-  -> ai-debt review
-  -> Debt Candidate
+  -> ownership review window
+  -> ai-debt review / MCP ownership review
+  -> Ownership Gap Candidate
   -> Evidence Gate
   -> 用户确认
-  -> Debt Ledger / Inbox
+  -> Ownership Debt Ledger
   -> Learn One
-  -> 可跳过的 Grasp Check
-  -> Deep Review Markdown 导出
+  -> agent-assessed Check
+  -> Task Control Report
 ```
 
 ## 当前状态
 
-Phase 1、Phase 2、Phase 3 的 MVP 实现已完成：
+MCP-first Ownership MVP 已完成：
 
 - Capture core、SQLite state、Build Journal、统一 `AgentEvent`。
 - Claude Code 和 Codex 双 primary adapter。
-- 用户触发的 review flow 和 Evidence Gate。
-- Debt Ledger、Learning Inbox、Learn One、可跳过的 Grasp Check。
-- Raw payload cleanup、delete support、journal recovery、Deep Review export。
-- 覆盖 Claude Code 和 Codex fixture path 的收敛测试。
+- 显式 session end 或 idle timeout 触发的 review window。
+- Ownership profile、ownership gap candidates、ownership debt ledger、concept index。
+- MCP ownership tools 覆盖 review input、analysis submission、用户动作、learning、check 和 report。
+- Raw payload cleanup、delete support、journal recovery、Task Control Report export。
+- 覆盖 Claude Code 和 Codex fixture path 的 ownership 收敛测试。
 
 ## 安装与初始化
 
@@ -65,8 +66,8 @@ python -m ai_debt.cli review --analysis-file result.json
 python -m ai_debt.cli review --action accept --candidate-id <candidate-id>
 python -m ai_debt.cli inbox
 python -m ai_debt.cli learn-one <debt-id>
-python -m ai_debt.cli check <debt-id> --answer "..."
-python -m ai_debt.cli export deep-review <session-id>
+python -m ai_debt.cli check <debt-id> --answer "..." --assessment-file assessment.json
+python -m ai_debt.cli export task-control <review-window-id>
 python -m ai_debt.cli cleanup --dry-run
 python -m ai_debt.cli cleanup
 python -m ai_debt.cli delete session <session-id>
@@ -91,13 +92,13 @@ python -m ai_debt.mcp_server
 
 ## Review 流程
 
-`ai-debt review` 不会自动调用后台 LLM。它会输出结构化 review input，供当前 agent 生成 analysis JSON。生成后导入：
+`ai-debt review` 不会自动调用后台 LLM。它会输出 window-scoped ownership review input，供当前 agent 生成 ownership analysis JSON。生成后导入：
 
 ```bash
-python -m ai_debt.cli review <session-id> --analysis-file result.json
+python -m ai_debt.cli review <review-window-id> --analysis-file result.json
 ```
 
-只有通过 Evidence Gate 的 candidate 才能被用户确认入账：
+只有通过 Evidence Gate 的 ownership gap candidate 才能被用户确认入账：
 
 ```bash
 python -m ai_debt.cli review --action accept --candidate-id <candidate-id>

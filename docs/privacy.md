@@ -17,7 +17,7 @@ ai-debt cleanup --dry-run
 ai-debt cleanup
 ```
 
-cleanup 只删除过期 raw payload。normalized event、Debt Ledger、Inbox、review action 和 evidence ref 会保留。
+cleanup 只删除过期 raw payload。normalized event、Ownership Debt Ledger、concept index、review action、check 和 evidence ref 会保留。
 
 ## Delete
 
@@ -26,4 +26,4 @@ ai-debt delete session <session-id>
 ai-debt delete debt <debt-id>
 ```
 
-删除 session 会删除该 session 的 journal/raw payload、candidate 和 evidence refs。删除 debt 会删除 inbox/check 状态，并把 review/evidence 中的 debt reference 置空。
+删除 session 会删除该 session 的 journal/raw payload、ownership review windows、candidates、debts、concept index 和 evidence refs。删除 debt 会删除 concept/check 状态，并把 review/evidence 中的 debt reference 置空。

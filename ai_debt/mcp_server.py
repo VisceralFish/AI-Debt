@@ -3,22 +3,26 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any, BinaryIO, TextIO
+from typing import Any, BinaryIO
 
 from .config import load_config
 from .core import capture_payload, initialize
-from .maintenance import cleanup_raw_payloads, delete_debt, delete_session, export_deep_review
-from .paths import db_path, state_home
-from .review import (
-    apply_review_action,
-    build_review_input,
-    create_candidates,
+from .maintenance import cleanup_raw_payloads, delete_debt, delete_session, export_task_control_report
+from .ownership import (
+    build_ownership_review_input,
+    create_ownership_candidates,
+    get_or_create_profile,
     learn_one,
-    list_inbox,
-    parse_analysis,
-    record_grasp_check,
-    select_review_session,
+    list_ownership_debts,
+    parse_ownership_analysis,
+    project_id_for_cwd,
+    record_check,
+    review_ownership_gap,
+    select_pending_review_window,
+    task_control_report,
+    update_profile,
 )
+from .paths import db_path, state_home
 from .schema import connect, migrate
 from .store import list_sessions as query_sessions
 from .store import recent_sessions, refresh_session_states, status_counts
@@ -56,8 +60,7 @@ def handle_jsonrpc(message: dict[str, Any]) -> dict[str, Any] | None:
             params = _object(message.get("params"), "params")
             name = _string(params.get("name"), "name")
             arguments = _object(params.get("arguments", {}), "arguments")
-            result = call_tool(name, arguments)
-            return _response(request_id, _tool_result(result))
+            return _response(request_id, _tool_result(call_tool(name, arguments)))
         if method == "resources/list":
             return _response(request_id, {"resources": list_resources()})
         if method == "resources/templates/list":
@@ -65,8 +68,7 @@ def handle_jsonrpc(message: dict[str, Any]) -> dict[str, Any] | None:
         if method == "resources/read":
             params = _object(message.get("params"), "params")
             uri = _string(params.get("uri"), "uri")
-            data = read_resource(uri)
-            return _response(request_id, _resource_result(uri, data))
+            return _response(request_id, _resource_result(uri, read_resource(uri)))
         return _error(request_id, -32601, f"Unknown method: {method}")
     except Exception as exc:
         return _error(request_id, -32000, str(exc))
@@ -77,15 +79,18 @@ def list_tools() -> list[dict[str, Any]]:
         _tool("record_event", "Capture one raw agent hook payload.", {"adapter": _string_schema(), "payload": _object_schema()}, ["adapter", "payload"]),
         _tool("get_status", "Return AI Debt state counts and recent sessions.", {}, []),
         _tool("list_sessions", "List recent sessions, optionally filtered by status.", {"limit": _integer_schema(), "status": _string_schema()}, []),
-        _tool("get_review_input", "Return the review input package for a session.", {"session_id": _string_schema()}, []),
-        _tool("submit_analysis", "Submit structured review analysis and create candidates.", {"session_id": _string_schema(), "analysis": _object_schema()}, ["session_id", "analysis"]),
-        _tool("review_action", "Apply accept, skip, or already_know to a candidate.", {"candidate_id": _string_schema(), "action": _string_schema()}, ["candidate_id", "action"]),
-        _tool("list_inbox", "List unresolved learning inbox items.", {}, []),
-        _tool("learn_one", "Return one L2 learning item for a candidate or debt.", {"item_id": _string_schema()}, []),
-        _tool("check", "Record a grasp check answer or skip.", {"debt_id": _string_schema(), "answer": _string_schema(), "skip": {"type": "boolean"}}, ["debt_id"]),
-        _tool("export_deep_review", "Export a deep review Markdown artifact.", {"session_id": _string_schema()}, []),
+        _tool("get_pending_review_window", "Return the next pending ownership review window.", {"review_window_id": _string_schema()}, []),
+        _tool("get_ownership_profile", "Return a project ownership profile.", {"project_id": _string_schema(), "cwd": _string_schema()}, []),
+        _tool("update_ownership_profile", "Patch a project ownership profile.", {"project_id": _string_schema(), "cwd": _string_schema(), "patch": _object_schema()}, ["patch"]),
+        _tool("get_ownership_review_input", "Return a window-scoped ownership review input package.", {"review_window_id": _string_schema()}, []),
+        _tool("submit_ownership_analysis", "Submit structured ownership analysis and create candidates.", {"review_window_id": _string_schema(), "analysis": _object_schema()}, ["review_window_id", "analysis"]),
+        _tool("review_ownership_gap", "Apply accept, ignore, already_know, or defer to an ownership candidate.", {"candidate_id": _string_schema(), "action": _string_schema()}, ["candidate_id", "action"]),
+        _tool("list_ownership_debts", "List accepted ownership debts.", {"project_id": _string_schema(), "status": _string_schema()}, []),
+        _tool("learn_one", "Return one ownership recovery task for a candidate or debt.", {"item_id": _string_schema()}, []),
+        _tool("check", "Record an ownership recovery check.", {"debt_id": _string_schema(), "answer": _string_schema(), "agent_assessment": _object_schema(), "user_override": _string_schema(), "skip": {"type": "boolean"}}, ["debt_id"]),
+        _tool("export_task_control_report", "Return a task control report as JSON and Markdown.", {"review_window_id": _string_schema(), "write_file": {"type": "boolean"}}, ["review_window_id"]),
         _tool("cleanup", "Clean up expired raw payloads.", {"dry_run": {"type": "boolean"}}, []),
-        _tool("delete_item", "Delete a session or debt.", {"target": _string_schema(), "id": _string_schema()}, ["target", "id"]),
+        _tool("delete_item", "Delete a session or ownership debt.", {"target": _string_schema(), "id": _string_schema()}, ["target", "id"]),
     ]
 
 
@@ -100,38 +105,39 @@ def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if name == "get_status":
         return get_status()
     if name == "list_sessions":
-        limit = int(arguments.get("limit") or 10)
-        status = arguments.get("status")
-        return {"sessions": _sessions(limit, str(status) if status else None)}
-    if name == "get_review_input":
-        return get_review_input(arguments.get("session_id"))
-    if name == "submit_analysis":
-        session_id = _string(arguments.get("session_id"), "session_id")
+        return {"sessions": _sessions(int(arguments.get("limit") or 10), _optional_string(arguments.get("status")))}
+    if name == "get_pending_review_window":
+        return get_pending_review_window(_optional_string(arguments.get("review_window_id")))
+    if name == "get_ownership_profile":
+        return get_profile(_optional_string(arguments.get("project_id")), _optional_string(arguments.get("cwd")))
+    if name == "update_ownership_profile":
+        return patch_profile(_optional_string(arguments.get("project_id")), _optional_string(arguments.get("cwd")), _object(arguments.get("patch"), "patch"))
+    if name == "get_ownership_review_input":
+        return get_ownership_review_input(_optional_string(arguments.get("review_window_id")))
+    if name == "submit_ownership_analysis":
+        review_window_id = _string(arguments.get("review_window_id"), "review_window_id")
         analysis = _object(arguments.get("analysis"), "analysis")
-        return submit_analysis(session_id, analysis)
-    if name == "review_action":
-        candidate_id = _string(arguments.get("candidate_id"), "candidate_id")
-        action = _string(arguments.get("action"), "action")
-        return review_action(candidate_id, action)
-    if name == "list_inbox":
-        return {"items": inbox_items()}
+        return submit_ownership_analysis(review_window_id, analysis)
+    if name == "review_ownership_gap":
+        return ownership_gap_action(_string(arguments.get("candidate_id"), "candidate_id"), _string(arguments.get("action"), "action"))
+    if name == "list_ownership_debts":
+        return {"items": ownership_debts(_optional_string(arguments.get("project_id")), _optional_string(arguments.get("status")))}
     if name == "learn_one":
-        item_id = arguments.get("item_id")
-        return learn_one_item(str(item_id) if item_id else None)
+        return learn_one_item(_optional_string(arguments.get("item_id")))
     if name == "check":
-        debt_id = _string(arguments.get("debt_id"), "debt_id")
-        answer = arguments.get("answer")
-        skip = bool(arguments.get("skip", False))
-        return check_item(debt_id, str(answer) if answer is not None else None, skip)
-    if name == "export_deep_review":
-        session_id = arguments.get("session_id")
-        return export_review(str(session_id) if session_id else None)
+        return check_item(
+            _string(arguments.get("debt_id"), "debt_id"),
+            _optional_string(arguments.get("answer")),
+            arguments.get("agent_assessment") if isinstance(arguments.get("agent_assessment"), dict) else None,
+            _optional_string(arguments.get("user_override")),
+            bool(arguments.get("skip", False)),
+        )
+    if name == "export_task_control_report":
+        return export_report(_string(arguments.get("review_window_id"), "review_window_id"), bool(arguments.get("write_file", False)))
     if name == "cleanup":
         return cleanup(bool(arguments.get("dry_run", False)))
     if name == "delete_item":
-        target = _string(arguments.get("target"), "target")
-        item_id = _string(arguments.get("id"), "id")
-        return delete_item(target, item_id)
+        return delete_item(_string(arguments.get("target"), "target"), _string(arguments.get("id"), "id"))
     raise ValueError(f"Unknown tool: {name}")
 
 
@@ -139,24 +145,15 @@ def list_resources() -> list[dict[str, str]]:
     return [
         {"uri": "ai-debt://status", "name": "AI Debt status", "description": "Current state counts and recent sessions.", "mimeType": "application/json"},
         {"uri": "ai-debt://sessions/recent", "name": "Recent sessions", "description": "Recent AI Debt sessions.", "mimeType": "application/json"},
-        {"uri": "ai-debt://inbox", "name": "Learning inbox", "description": "Open cognitive debt inbox items.", "mimeType": "application/json"},
+        {"uri": "ai-debt://ownership/debts", "name": "Ownership debts", "description": "Accepted ownership debts.", "mimeType": "application/json"},
     ]
 
 
 def list_resource_templates() -> list[dict[str, str]]:
     return [
-        {
-            "uriTemplate": "ai-debt://sessions/{session_id}/review-input",
-            "name": "Session review input",
-            "description": "Review input package for one AI Debt session.",
-            "mimeType": "application/json",
-        },
-        {
-            "uriTemplate": "ai-debt://exports/deep-review/{session_id}",
-            "name": "Deep review export",
-            "description": "Existing deep review Markdown export for one session.",
-            "mimeType": "application/json",
-        },
+        {"uriTemplate": "ai-debt://ownership/windows/{review_window_id}/review-input", "name": "Ownership review input", "description": "Window-scoped ownership review input.", "mimeType": "application/json"},
+        {"uriTemplate": "ai-debt://ownership/windows/{review_window_id}/task-control-report", "name": "Task control report", "description": "Task control report for one review window.", "mimeType": "application/json"},
+        {"uriTemplate": "ai-debt://ownership/profiles/{project_id}", "name": "Ownership profile", "description": "Project ownership profile.", "mimeType": "application/json"},
     ]
 
 
@@ -165,27 +162,27 @@ def read_resource(uri: str) -> dict[str, Any]:
         return get_status()
     if uri == "ai-debt://sessions/recent":
         return {"sessions": _sessions(10, None)}
-    if uri == "ai-debt://inbox":
-        return {"items": inbox_items()}
-    prefix = "ai-debt://sessions/"
-    suffix = "/review-input"
-    if uri.startswith(prefix) and uri.endswith(suffix):
-        session_id = uri[len(prefix) : -len(suffix)]
-        return get_review_input(session_id)
-    export_prefix = "ai-debt://exports/deep-review/"
-    if uri.startswith(export_prefix):
-        session_id = uri[len(export_prefix) :]
-        return _read_export(session_id)
+    if uri == "ai-debt://ownership/debts":
+        return {"items": ownership_debts(None, None)}
+    review_prefix = "ai-debt://ownership/windows/"
+    if uri.startswith(review_prefix) and uri.endswith("/review-input"):
+        window_id = uri[len(review_prefix) : -len("/review-input")]
+        return get_ownership_review_input(window_id)
+    if uri.startswith(review_prefix) and uri.endswith("/task-control-report"):
+        window_id = uri[len(review_prefix) : -len("/task-control-report")]
+        return export_report(window_id, False)
+    profile_prefix = "ai-debt://ownership/profiles/"
+    if uri.startswith(profile_prefix):
+        return get_profile(uri[len(profile_prefix) :], None)
     raise ValueError(f"Unknown resource: {uri}")
 
 
 def get_status() -> dict[str, Any]:
     initialize()
-    config = load_config()
     conn = connect(db_path())
     try:
         migrate(conn)
-        refresh_session_states(conn, config)
+        refresh_session_states(conn, load_config())
         counts = status_counts(conn)
         sessions = [dict(row) for row in recent_sessions(conn)]
     finally:
@@ -193,49 +190,75 @@ def get_status() -> dict[str, Any]:
     return {"state_home": str(state_home()), "counts": counts, "recent_sessions": sessions}
 
 
-def get_review_input(session_id: Any = None) -> dict[str, Any]:
+def get_pending_review_window(review_window_id: str | None = None) -> dict[str, Any]:
     initialize()
     conn = connect(db_path())
     try:
-        session = select_review_session(conn, str(session_id) if session_id else None)
-        if session is None:
-            raise ValueError("No session ready for review")
-        return build_review_input(conn, session["id"])
+        window = select_pending_review_window(conn, review_window_id)
+        return {"review_window": dict(window) if window else None}
     finally:
         conn.close()
 
 
-def submit_analysis(session_id: str, analysis: dict[str, Any]) -> dict[str, Any]:
+def get_profile(project_id: str | None, cwd: str | None) -> dict[str, Any]:
     initialize()
-    parsed = parse_analysis(json.dumps(analysis, ensure_ascii=False))
+    resolved = project_id or project_id_for_cwd(cwd)
     conn = connect(db_path())
     try:
-        created = create_candidates(conn, session_id, parsed)
+        return {"profile": get_or_create_profile(conn, resolved)}
     finally:
         conn.close()
-    return {"created": created}
 
 
-def review_action(candidate_id: str, action: str) -> dict[str, Any]:
+def patch_profile(project_id: str | None, cwd: str | None, patch: dict[str, Any]) -> dict[str, Any]:
+    initialize()
+    resolved = project_id or project_id_for_cwd(cwd)
+    conn = connect(db_path())
+    try:
+        return {"profile": update_profile(conn, resolved, patch)}
+    finally:
+        conn.close()
+
+
+def get_ownership_review_input(review_window_id: str | None = None) -> dict[str, Any]:
     initialize()
     conn = connect(db_path())
     try:
-        debt_id = apply_review_action(conn, candidate_id, action)
+        return build_ownership_review_input(conn, review_window_id)
+    finally:
+        conn.close()
+
+
+def submit_ownership_analysis(review_window_id: str, analysis: dict[str, Any]) -> dict[str, Any]:
+    initialize()
+    parsed = parse_ownership_analysis(json.dumps(analysis, ensure_ascii=False))
+    conn = connect(db_path())
+    try:
+        return {"created": create_ownership_candidates(conn, review_window_id, parsed)}
+    finally:
+        conn.close()
+
+
+def ownership_gap_action(candidate_id: str, action: str) -> dict[str, Any]:
+    initialize()
+    conn = connect(db_path())
+    try:
+        debt_id = review_ownership_gap(conn, candidate_id, action)
     finally:
         conn.close()
     return {"candidate_id": candidate_id, "action": action, "debt_id": debt_id}
 
 
-def inbox_items() -> list[dict[str, Any]]:
+def ownership_debts(project_id: str | None, status: str | None) -> list[dict[str, Any]]:
     initialize()
     conn = connect(db_path())
     try:
-        return [dict(row) for row in list_inbox(conn)]
+        return [dict(row) for row in list_ownership_debts(conn, project_id, status)]
     finally:
         conn.close()
 
 
-def learn_one_item(item_id: str | None = None) -> dict[str, str]:
+def learn_one_item(item_id: str | None = None) -> dict[str, Any]:
     initialize()
     conn = connect(db_path())
     try:
@@ -244,24 +267,23 @@ def learn_one_item(item_id: str | None = None) -> dict[str, str]:
         conn.close()
 
 
-def check_item(debt_id: str, answer: str | None, skip: bool) -> dict[str, str]:
+def check_item(debt_id: str, answer: str | None, agent_assessment: dict[str, Any] | None, user_override: str | None, skip: bool) -> dict[str, str]:
     initialize()
     conn = connect(db_path())
     try:
-        result = record_grasp_check(conn, debt_id, answer, skipped=skip)
+        result = record_check(conn, debt_id, answer, agent_assessment, user_override, skipped=skip)
     finally:
         conn.close()
     return {"result": result}
 
 
-def export_review(session_id: str | None = None) -> dict[str, str]:
+def export_report(review_window_id: str, write_file: bool) -> dict[str, Any]:
     initialize()
     conn = connect(db_path())
     try:
-        path = export_deep_review(conn, session_id)
+        return task_control_report(conn, review_window_id, write_file=write_file)
     finally:
         conn.close()
-    return {"path": str(path)}
 
 
 def cleanup(dry_run: bool = False) -> dict[str, list[str]]:
@@ -295,13 +317,6 @@ def _sessions(limit: int, status: str | None) -> list[dict[str, Any]]:
         conn.close()
 
 
-def _read_export(session_id: str) -> dict[str, str]:
-    path = state_home() / "exports" / "deep_review" / f"deep_review_{_safe_name(session_id)}.md"
-    if not path.exists():
-        raise ValueError(f"Deep review export not found: {session_id}")
-    return {"path": str(path), "content": path.read_text(encoding="utf-8")}
-
-
 def _initialize_result() -> dict[str, Any]:
     return {
         "protocolVersion": PROTOCOL_VERSION,
@@ -311,11 +326,7 @@ def _initialize_result() -> dict[str, Any]:
 
 
 def _tool(name: str, description: str, properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
-    return {
-        "name": name,
-        "description": description,
-        "inputSchema": {"type": "object", "properties": properties, "required": required},
-    }
+    return {"name": name, "description": description, "inputSchema": {"type": "object", "properties": properties, "required": required}}
 
 
 def _tool_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -380,6 +391,12 @@ def _string(value: Any, name: str) -> str:
     return value
 
 
+def _optional_string(value: Any) -> str | None:
+    if value is None or value == "":
+        return None
+    return str(value)
+
+
 def _object_schema() -> dict[str, str]:
     return {"type": "object"}
 
@@ -400,10 +417,6 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, list):
         return [_jsonable(item) for item in value]
     return value
-
-
-def _safe_name(value: str) -> str:
-    return "".join(char if char.isalnum() or char in {"-", "_", "."} else "_" for char in value)
 
 
 if __name__ == "__main__":

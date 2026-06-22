@@ -8,6 +8,7 @@ from pathlib import Path
 from .config import AppConfig
 from .events import AgentEvent, event_summary
 from .journal import session_dir
+from .ownership import project_id_for_cwd, refresh_review_windows_for_session_status, update_review_window_for_event
 
 
 def record_event(conn: sqlite3.Connection, event: AgentEvent, home: Path | None = None) -> None:
@@ -15,17 +16,19 @@ def record_event(conn: sqlite3.Connection, event: AgentEvent, home: Path | None 
     cwd = event.get("cwd")
     transcript_ref = event.get("transcript_ref")
     started_at = event["occurred_at"]
-    existing = conn.execute("SELECT id, started_at, cwd, transcript_ref FROM sessions WHERE id = ?", (event["session_id"],)).fetchone()
+    existing = conn.execute("SELECT id, started_at, cwd, transcript_ref, project_id FROM sessions WHERE id = ?", (event["session_id"],)).fetchone()
     if existing:
         started_at = existing["started_at"]
         cwd = cwd or existing["cwd"]
         transcript_ref = transcript_ref or existing["transcript_ref"]
+    project_id = existing["project_id"] if existing and existing["project_id"] else project_id_for_cwd(cwd)
 
     conn.execute(
         """
-        INSERT INTO sessions(id, source, cwd, transcript_ref, started_at, last_activity_at, ended_at, status, journal_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO sessions(id, project_id, source, cwd, transcript_ref, started_at, last_activity_at, ended_at, status, journal_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
+          project_id = COALESCE(excluded.project_id, sessions.project_id),
           source = excluded.source,
           cwd = COALESCE(excluded.cwd, sessions.cwd),
           transcript_ref = COALESCE(excluded.transcript_ref, sessions.transcript_ref),
@@ -36,6 +39,7 @@ def record_event(conn: sqlite3.Connection, event: AgentEvent, home: Path | None 
         """,
         (
             event["session_id"],
+            project_id,
             event["source"],
             cwd,
             transcript_ref,
@@ -46,7 +50,7 @@ def record_event(conn: sqlite3.Connection, event: AgentEvent, home: Path | None 
             str(session_dir(event["session_id"], home)),
         ),
     )
-    conn.execute(
+    cursor = conn.execute(
         """
         INSERT INTO agent_events(
           session_id, source, type, turn_id, summary, raw_payload_ref, occurred_at, payload_json
@@ -64,6 +68,7 @@ def record_event(conn: sqlite3.Connection, event: AgentEvent, home: Path | None 
             json.dumps(event, ensure_ascii=False, sort_keys=True),
         ),
     )
+    update_review_window_for_event(conn, event, int(cursor.lastrowid), project_id)
     conn.commit()
 
 
@@ -80,6 +85,7 @@ def refresh_session_states(conn: sqlite3.Connection, config: AppConfig, now: dat
             next_status = "idle_detected"
         if next_status != row["status"]:
             conn.execute("UPDATE sessions SET status = ? WHERE id = ?", (next_status, row["id"]))
+            refresh_review_windows_for_session_status(conn, row["id"], next_status)
     conn.commit()
 
 
@@ -91,7 +97,7 @@ def status_counts(conn: sqlite3.Connection) -> dict[str, int]:
 def recent_sessions(conn: sqlite3.Connection, limit: int = 5) -> list[sqlite3.Row]:
     return conn.execute(
         """
-        SELECT id, source, status, last_activity_at
+        SELECT id, project_id, source, status, last_activity_at
         FROM sessions
         ORDER BY last_activity_at DESC
         LIMIT ?
@@ -104,7 +110,7 @@ def list_sessions(conn: sqlite3.Connection, limit: int = 10, status: str | None 
     if status:
         return conn.execute(
             """
-            SELECT id, source, status, last_activity_at
+            SELECT id, project_id, source, status, last_activity_at
             FROM sessions
             WHERE status = ?
             ORDER BY last_activity_at DESC

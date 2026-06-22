@@ -2,7 +2,7 @@
 
 # AI Debt
 
-AI Debt is a local-first cognitive debt ledger for AI-assisted build sessions. It helps AI builders understand what the agent did on their behalf, which decisions may need review, and which accepted gaps should be tracked as learning or maintenance work.
+AI Debt is a local-first ownership debt ledger for AI-assisted build sessions. It helps AI builders identify which project control points an agent touched, which ownership gaps need review, and which accepted gaps should become recovery tasks.
 
 The MVP covers the full loop:
 
@@ -11,27 +11,28 @@ Claude Code / Codex Hook
   -> Agent Adapter
   -> Normalized AgentEvent
   -> Build Journal
-  -> pending_settlement
-  -> ai-debt review
-  -> Debt Candidate
+  -> ownership review window
+  -> ai-debt review / MCP ownership review
+  -> Ownership Gap Candidate
   -> Evidence Gate
   -> user confirmation
-  -> Debt Ledger / Inbox
+  -> Ownership Debt Ledger
   -> Learn One
-  -> optional Grasp Check
-  -> Deep Review Markdown export
+  -> agent-assessed Check
+  -> Task Control Report
 ```
 
 ## Status
 
-Phase 1, Phase 2, and Phase 3 MVP implementation are in place:
+The MCP-first ownership MVP is in place:
 
 - Capture core, SQLite state, Build Journal, and normalized `AgentEvent`.
 - Claude Code and Codex primary adapters.
-- User-triggered review flow with Evidence Gate.
-- Debt Ledger, Learning Inbox, Learn One, and skippable Grasp Check.
-- Raw payload cleanup, delete support, recovery from journals, and Deep Review export.
-- Convergence tests for both Claude Code and Codex fixture paths.
+- Review windows triggered by explicit session end or idle timeout.
+- Ownership profile, ownership gap candidates, ownership debt ledger, and concept index.
+- MCP ownership tools for review input, analysis submission, user action, learning, checks, and reports.
+- Raw payload cleanup, delete support, recovery from journals, and Task Control Report export.
+- Ownership convergence tests for both Claude Code and Codex fixture paths.
 
 ## Installation
 
@@ -69,8 +70,8 @@ ai-debt review --analysis-file result.json
 ai-debt review --action accept --candidate-id <candidate-id>
 ai-debt inbox
 ai-debt learn-one <debt-id>
-ai-debt check <debt-id> --answer "..."
-ai-debt export deep-review <session-id>
+ai-debt check <debt-id> --answer "..." --assessment-file assessment.json
+ai-debt export task-control <review-window-id>
 ai-debt cleanup --dry-run
 ai-debt cleanup
 ai-debt delete session <session-id>
@@ -95,13 +96,13 @@ See [MCP Usage](docs/mcp-usage.md) for the tool list and Codex flow.
 
 ## Review Flow
 
-`ai-debt review` does not call a background LLM. It emits a structured review input package for the current agent. After the current agent generates a structured analysis JSON file, import it with:
+`ai-debt review` does not call a background LLM. It emits a window-scoped ownership review input package for the current agent. After the agent generates ownership analysis JSON, import it with:
 
 ```bash
-ai-debt review <session-id> --analysis-file result.json
+ai-debt review <review-window-id> --analysis-file result.json
 ```
 
-Only evidence-backed candidates can be accepted into the ledger:
+Only evidence-backed ownership gap candidates can be accepted into the ledger:
 
 ```bash
 ai-debt review --action accept --candidate-id <candidate-id>

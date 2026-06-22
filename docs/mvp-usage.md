@@ -18,28 +18,33 @@ ai-debt hook codex
 
 并从 stdin 传入 JSON payload。
 
-## 2. Settlement
+## 2. Review Window
 
-`session_ended` 会直接进入 `pending_settlement`。缺少 Stop/SessionEnd 时，`status` 会按 idle 阈值刷新状态；数据库丢失时会从 `journals/*/events.jsonl` 恢复。
+`session_ended` 会把当前 open review window 推到 `pending_ownership_review`。缺少 Stop/SessionEnd 时，`status` 会按 idle 阈值刷新；idle timeout 是 review 触发器，不代表任务真实结束。
 
-## 3. Review
+数据库丢失时会从 `journals/*/events.jsonl` 恢复 normalized events 和 review window。
 
-生成 review input：
+## 3. Ownership Review
+
+生成 window-scoped ownership review input：
 
 ```bash
 ai-debt review
 ```
 
-把当前 agent 生成的结构化 JSON 保存为 `result.json` 后导入：
+把当前 agent 生成的 ownership analysis JSON 保存为 `result.json` 后导入：
 
 ```bash
-ai-debt review <session-id> --analysis-file result.json
+ai-debt review <review-window-id> --analysis-file result.json
 ```
 
 确认候选：
 
 ```bash
 ai-debt review --action accept --candidate-id <candidate-id>
+ai-debt review --action ignore --candidate-id <candidate-id>
+ai-debt review --action already_know --candidate-id <candidate-id>
+ai-debt review --action defer --candidate-id <candidate-id>
 ```
 
 ## 4. Learn And Check
@@ -47,17 +52,19 @@ ai-debt review --action accept --candidate-id <candidate-id>
 ```bash
 ai-debt inbox
 ai-debt learn-one <debt-id>
-ai-debt check <debt-id> --answer "..."
+ai-debt check <debt-id> --answer "..." --assessment-file assessment.json
 ```
+
+没有 `assessment-file` 时，check 只记录进展，不使用字数规则判断掌握程度。
 
 ## 5. Export
 
 ```bash
-ai-debt export deep-review <session-id>
+ai-debt export task-control <review-window-id>
 ```
 
 输出位于：
 
 ```text
-~/.ai-debt/exports/deep_review/deep_review_<session-id>.md
+~/.ai-debt/exports/task_control/task_control_<review-window-id>.md
 ```

@@ -12,6 +12,7 @@ from .config import AppConfig
 from .events import validate_event
 from .journal import utc_now
 from .paths import exports_path, journals_path
+from .ownership import task_control_report
 from .store import record_event, refresh_session_states
 
 
@@ -38,7 +39,10 @@ def cleanup_raw_payloads(config: AppConfig, home: Path | None = None, dry_run: b
 def delete_session(conn: sqlite3.Connection, session_id: str, home: Path | None = None) -> None:
     journal_path = journals_path(home) / _safe_name(session_id)
     conn.execute("DELETE FROM evidence_refs WHERE session_id = ?", (session_id,))
-    conn.execute("DELETE FROM debt_candidates WHERE session_id = ?", (session_id,))
+    conn.execute("DELETE FROM ownership_concepts WHERE debt_id IN (SELECT id FROM ownership_debts WHERE source_session_id = ?)", (session_id,))
+    conn.execute("DELETE FROM ownership_debts WHERE source_session_id = ?", (session_id,))
+    conn.execute("DELETE FROM ownership_gap_candidates WHERE session_id = ?", (session_id,))
+    conn.execute("DELETE FROM ownership_review_windows WHERE session_id = ?", (session_id,))
     conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
     conn.commit()
     if journal_path.exists():
@@ -46,49 +50,20 @@ def delete_session(conn: sqlite3.Connection, session_id: str, home: Path | None 
 
 
 def delete_debt(conn: sqlite3.Connection, debt_id: str) -> None:
-    conn.execute("DELETE FROM inbox_items WHERE debt_id = ?", (debt_id,))
+    conn.execute("DELETE FROM ownership_concepts WHERE debt_id = ?", (debt_id,))
     conn.execute("DELETE FROM grasp_checks WHERE debt_id = ?", (debt_id,))
     conn.execute("UPDATE evidence_refs SET debt_id = NULL WHERE debt_id = ?", (debt_id,))
     conn.execute("UPDATE review_actions SET debt_id = NULL WHERE debt_id = ?", (debt_id,))
-    conn.execute("DELETE FROM cognitive_debts WHERE id = ?", (debt_id,))
+    conn.execute("DELETE FROM ownership_debts WHERE id = ?", (debt_id,))
     conn.commit()
 
 
-def export_deep_review(conn: sqlite3.Connection, session_id: str | None = None, home: Path | None = None) -> Path:
-    session = _select_export_session(conn, session_id)
-    if session is None:
-        raise ValueError("No reviewed session available for export")
-
-    candidates = conn.execute(
-        """
-        SELECT * FROM debt_candidates
-        WHERE session_id = ?
-        ORDER BY created_at ASC
-        """,
-        (session["id"],),
-    ).fetchall()
-    debts = conn.execute(
-        """
-        SELECT * FROM cognitive_debts
-        WHERE source_session_id = ?
-        ORDER BY created_at ASC
-        """,
-        (session["id"],),
-    ).fetchall()
-    actions = conn.execute(
-        """
-        SELECT * FROM review_actions
-        WHERE candidate_id IN (SELECT id FROM debt_candidates WHERE session_id = ?)
-        ORDER BY created_at ASC
-        """,
-        (session["id"],),
-    ).fetchall()
-
-    export_dir = exports_path(home) / "deep_review"
-    export_dir.mkdir(parents=True, exist_ok=True)
-    path = export_dir / f"deep_review_{_safe_name(session['id'])}.md"
-    path.write_text(_render_deep_review(session, candidates, debts, actions), encoding="utf-8")
-    return path
+def export_task_control_report(conn: sqlite3.Connection, review_window_id: str | None = None, home: Path | None = None) -> Path:
+    window = _select_export_window(conn, review_window_id)
+    if window is None:
+        raise ValueError("No ownership review window available for export")
+    result = task_control_report(conn, window["id"], home, write_file=True)
+    return Path(result["path"])
 
 
 def recover_from_journals(conn: sqlite3.Connection, config: AppConfig, home: Path | None = None) -> int:
@@ -119,11 +94,13 @@ def schema_is_valid(conn: sqlite3.Connection) -> bool:
         "sessions",
         "agent_events",
         "evidence_refs",
-        "debt_candidates",
-        "cognitive_debts",
+        "ownership_profiles",
+        "ownership_review_windows",
+        "ownership_gap_candidates",
+        "ownership_debts",
+        "ownership_concepts",
         "review_actions",
         "grasp_checks",
-        "inbox_items",
     }
     rows = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
     return required.issubset({row["name"] for row in rows})
@@ -154,92 +131,18 @@ def raw_payload_cleanup_summary(config: AppConfig, home: Path | None = None, now
     return total, expired
 
 
-def _select_export_session(conn: sqlite3.Connection, session_id: str | None) -> sqlite3.Row | None:
-    if session_id:
-        return conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+def _select_export_window(conn: sqlite3.Connection, review_window_id: str | None) -> sqlite3.Row | None:
+    if review_window_id:
+        return conn.execute("SELECT * FROM ownership_review_windows WHERE id = ?", (review_window_id,)).fetchone()
     return conn.execute(
         """
-        SELECT * FROM sessions
-        WHERE status IN ('candidates_ready', 'pending_settlement')
-           OR id IN (SELECT source_session_id FROM cognitive_debts)
-        ORDER BY last_activity_at DESC
+        SELECT * FROM ownership_review_windows
+        WHERE status IN ('candidates_ready', 'reviewed', 'analysis_submitted', 'pending_ownership_review')
+           OR id IN (SELECT source_review_window_id FROM ownership_debts)
+        ORDER BY updated_at DESC
         LIMIT 1
         """
     ).fetchone()
-
-
-def _render_deep_review(
-    session: sqlite3.Row,
-    candidates: list[sqlite3.Row],
-    debts: list[sqlite3.Row],
-    actions: list[sqlite3.Row],
-) -> str:
-    candidate_payloads = [_payload(row) for row in candidates]
-    session_summary = next((payload.get("session_summary") for payload in candidate_payloads if payload.get("session_summary")), "No session summary captured.")
-    delegation_points = _delegation_points(candidate_payloads)
-    skipped = [row for row in candidates if row["status"] in {"skipped", "dismissed_as_known", "rejected_needs_evidence"}]
-    lines = [
-        f"# Deep Review: {session['id']}",
-        "",
-        "## Session Summary",
-        str(session_summary),
-        "",
-        "## Delegation Points",
-    ]
-    if delegation_points:
-        for point in delegation_points:
-            lines.append(f"- {point}")
-    else:
-        lines.append("- No delegation points captured.")
-    lines.extend(["", "## Accepted Debts"])
-    if debts:
-        for debt in debts:
-            lines.append(f"- [{debt['priority']}] {debt['concept']} ({debt['debt_dimension']}): {debt['why_it_matters']}")
-    else:
-        lines.append("- No accepted debts.")
-    lines.extend(["", "## Skipped Candidates"])
-    if skipped:
-        for candidate in skipped:
-            lines.append(f"- {candidate['concept']} ({candidate['status']})")
-    else:
-        lines.append("- No skipped candidates.")
-    lines.extend(["", "## Intent Rationale"])
-    for debt in debts:
-        if debt["debt_dimension"] == "intent":
-            lines.append(f"- {debt['concept']}: {debt['why_it_matters']}")
-    if not any(debt["debt_dimension"] == "intent" for debt in debts):
-        lines.append("- No accepted intent debt.")
-    lines.extend(["", "## Risks And Alternatives"])
-    if actions:
-        lines.append("- Review actions were recorded; inspect candidate evidence before relying on conclusions.")
-    else:
-        lines.append("- No review actions recorded yet.")
-    lines.extend(["", "## Recommended Next Checks"])
-    if debts:
-        for debt in debts:
-            lines.append(f"- Run `ai-debt learn-one {debt['id']}` then `ai-debt check {debt['id']}`.")
-    else:
-        lines.append("- Run `ai-debt review` and accept evidence-backed candidates first.")
-    lines.append("")
-    return "\n".join(lines)
-
-
-def _payload(row: sqlite3.Row) -> dict[str, Any]:
-    try:
-        return json.loads(row["payload_json"])
-    except json.JSONDecodeError:
-        return {}
-
-
-def _delegation_points(payloads: list[dict[str, Any]]) -> list[str]:
-    points: list[str] = []
-    seen: set[str] = set()
-    for payload in payloads:
-        point_id = payload.get("delegation_point_id")
-        if point_id and str(point_id) not in seen:
-            seen.add(str(point_id))
-            points.append(str(point_id))
-    return points
 
 
 def _safe_name(value: str) -> str:

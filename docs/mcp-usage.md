@@ -1,6 +1,6 @@
 # MCP Usage
 
-AI Debt 的 MCP server 让支持 MCP 的 AI coding agent 直接调用 AI Debt core。它不替代 CLI，也不自动调用后台 LLM。
+AI Debt 的 MCP server 是 Ownership Debt 主入口。它不替代 CLI，也不自动调用后台 LLM；agent 负责生成 ownership analysis，AI Debt 负责证据、窗口、profile、校验、持久化和报告。
 
 ## 启动
 
@@ -16,21 +16,22 @@ ai-debt-mcp
 python -m ai_debt.mcp_server
 ```
 
-MCP server 走 stdio JSON-RPC，暴露 tools 和 resources。
-
 ## Tools
 
 ```text
 record_event
 get_status
 list_sessions
-get_review_input
-submit_analysis
-review_action
-list_inbox
+get_pending_review_window
+get_ownership_profile
+update_ownership_profile
+get_ownership_review_input
+submit_ownership_analysis
+review_ownership_gap
+list_ownership_debts
 learn_one
 check
-export_deep_review
+export_task_control_report
 cleanup
 delete_item
 ```
@@ -41,14 +42,14 @@ delete_item
 1. record_event(adapter="codex", payload={...SessionStart...})
 2. record_event(adapter="codex", payload={...PostToolUse...})
 3. record_event(adapter="codex", payload={...SessionEnd...})
-4. get_status()
-5. get_review_input(session_id)
-6. Codex 使用当前上下文生成 analysis JSON
-7. submit_analysis(session_id, analysis)
-8. review_action(candidate_id, "accept")
+4. get_pending_review_window()
+5. get_ownership_review_input(review_window_id)
+6. Codex 使用当前上下文生成 ownership analysis JSON
+7. submit_ownership_analysis(review_window_id, analysis)
+8. review_ownership_gap(candidate_id, "accept" | "ignore" | "already_know" | "defer")
 9. learn_one(debt_id)
-10. check(debt_id, answer 或 skip)
-11. export_deep_review(session_id)
+10. check(debt_id, answer, agent_assessment)
+11. export_task_control_report(review_window_id)
 ```
 
 ## Resources
@@ -56,9 +57,10 @@ delete_item
 ```text
 ai-debt://status
 ai-debt://sessions/recent
-ai-debt://sessions/{session_id}/review-input
-ai-debt://inbox
-ai-debt://exports/deep-review/{session_id}
+ai-debt://ownership/debts
+ai-debt://ownership/windows/{review_window_id}/review-input
+ai-debt://ownership/windows/{review_window_id}/task-control-report
+ai-debt://ownership/profiles/{project_id}
 ```
 
 ## 边界

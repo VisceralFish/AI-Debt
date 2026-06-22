@@ -1,5 +1,7 @@
 # MCP Plan Spec
 
+> 旧版 MCP 计划，仅作历史参考。当前实现基准见 `docs/ownership-mcp-spec.md`，MCP surface 已切换为 Ownership Debt 语义。
+
 ## 1. 目标
 
 为 AI Debt 增加 MCP server 形态，让 Codex、Claude Code 或其他支持 MCP 的 AI coding agent 可以通过 tool call 直接访问 AI Debt core，而不只依赖 shell command 和 hook stdin。
