@@ -44,6 +44,12 @@ python -m ai_debt.cli init claude-code
 python -m ai_debt.cli init codex
 ```
 
+`ai-debt init <adapter>` 会为当前项目准备 ownership profile。交互式终端会询问是否运行冷启动 profile 问卷；非交互运行或使用 `--no-profile-setup` 时，会写入默认 project profile。已有 profile 不会被覆盖，除非显式运行：
+
+```bash
+ai-debt profile setup --force
+```
+
 默认本地状态目录：
 
 ```text
@@ -61,6 +67,8 @@ python -m ai_debt.cli init codex
 ```bash
 python -m ai_debt.cli status
 python -m ai_debt.cli doctor
+python -m ai_debt.cli profile show
+python -m ai_debt.cli profile setup
 python -m ai_debt.cli review
 python -m ai_debt.cli review --analysis-file result.json
 python -m ai_debt.cli review --action accept --candidate-id <candidate-id>

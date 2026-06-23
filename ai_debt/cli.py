@@ -31,6 +31,7 @@ from .ownership import (
     review_ownership_gap,
     select_pending_review_window,
 )
+from .profile_setup import load_project_profile, profile_exists, setup_project_profile
 from .schema import connect, migrate
 from .store import recent_sessions, refresh_session_states, status_counts
 
@@ -41,9 +42,18 @@ def main(argv: list[str] | None = None) -> int:
 
     init_parser = subparsers.add_parser("init")
     init_parser.add_argument("adapter", nargs="?", choices=["claude-code", "codex"])
+    init_profile_group = init_parser.add_mutually_exclusive_group()
+    init_profile_group.add_argument("--profile-setup", action="store_true")
+    init_profile_group.add_argument("--no-profile-setup", action="store_true")
 
     subparsers.add_parser("status")
     subparsers.add_parser("doctor")
+
+    profile_parser = subparsers.add_parser("profile")
+    profile_subparsers = profile_parser.add_subparsers(dest="profile_command", required=True)
+    profile_subparsers.add_parser("show")
+    profile_setup_parser = profile_subparsers.add_parser("setup")
+    profile_setup_parser.add_argument("--force", action="store_true")
 
     companion_parser = subparsers.add_parser("companion")
     companion_parser.add_argument("--once", action="store_true")
@@ -84,11 +94,16 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "init":
-            return _init(args.adapter)
+            return _init(args.adapter, args.profile_setup, args.no_profile_setup)
         if args.command == "status":
             return _status()
         if args.command == "doctor":
             return _doctor()
+        if args.command == "profile":
+            if args.profile_command == "show":
+                return _profile_show()
+            if args.profile_command == "setup":
+                return _profile_setup(args.force)
         if args.command == "companion":
             return _companion(args.once)
         if args.command == "hook":
@@ -113,15 +128,92 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _init(adapter: str | None) -> int:
+def _init(adapter: str | None, force_profile_setup: bool = False, no_profile_setup: bool = False) -> int:
     initialize()
     if adapter:
         mark_adapter(adapter)
         hook_path = write_hook_script(adapter)
         print(f"initialized {adapter} adapter")
         print(f"hook script: {hook_path}")
+        _setup_profile_for_init(force_profile_setup, no_profile_setup)
         return 0
     print(f"initialized AI Debt state at {state_home()}")
+    return 0
+
+
+def _setup_profile_for_init(force_profile_setup: bool, no_profile_setup: bool) -> None:
+    conn = connect(db_path())
+    cwd = str(Path.cwd())
+    project_id = project_id_for_cwd(cwd)
+    try:
+        migrate(conn)
+        if profile_exists(conn, project_id):
+            print(f"ownership profile: already configured for {project_id}")
+            print("run: ai-debt profile setup --force")
+            return
+        interactive = bool(force_profile_setup and sys.stdin.isatty())
+        if not force_profile_setup and not no_profile_setup and sys.stdin.isatty():
+            answer = _prompt_line("Ownership profile for this project is not set up. Set it up now? [Y/n]: ").strip().lower()
+            interactive = answer not in {"n", "no"}
+        profile, created = setup_project_profile(
+            conn,
+            cwd,
+            force=False,
+            interactive=interactive,
+            input_stream=sys.stdin,
+            output=sys.stdout,
+        )
+    finally:
+        conn.close()
+    if created:
+        mode = "configured" if interactive else "default created"
+        print(f"ownership profile: {mode} for {profile['project_id']}")
+
+
+def _profile_show() -> int:
+    initialize()
+    project_id = project_id_for_cwd(str(Path.cwd()))
+    conn = connect(db_path())
+    try:
+        migrate(conn)
+        profile = load_project_profile(conn, project_id)
+    finally:
+        conn.close()
+    if profile is None:
+        print(f"ownership profile: not configured for {project_id}")
+        print("run: ai-debt profile setup")
+        return 0
+    print(json.dumps(profile, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _prompt_line(prompt: str) -> str:
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    return sys.stdin.readline()
+
+
+def _profile_setup(force: bool) -> int:
+    initialize()
+    cwd = str(Path.cwd())
+    conn = connect(db_path())
+    try:
+        migrate(conn)
+        profile, created = setup_project_profile(
+            conn,
+            cwd,
+            force=force,
+            interactive=sys.stdin.isatty(),
+            input_stream=sys.stdin,
+            output=sys.stdout,
+        )
+    finally:
+        conn.close()
+    if created:
+        print(f"ownership profile: configured for {profile['project_id']}")
+    else:
+        print(f"ownership profile: already configured for {profile['project_id']}")
+        print("run: ai-debt profile setup --force")
     return 0
 
 

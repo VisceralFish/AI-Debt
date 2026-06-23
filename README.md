@@ -48,6 +48,12 @@ ai-debt init codex
 Installing the package exposes the native `ai-debt` console command from the
 script entry point in `pyproject.toml`.
 
+`ai-debt init <adapter>` also prepares an ownership profile for the current project. In an interactive terminal it asks whether to run the cold-start profile questionnaire; in non-interactive runs or with `--no-profile-setup`, it writes the default project profile. Existing profiles are not overwritten unless you run:
+
+```bash
+ai-debt profile setup --force
+```
+
 Default local state directory:
 
 ```text
@@ -65,6 +71,8 @@ Default local state directory:
 ```bash
 ai-debt status
 ai-debt doctor
+ai-debt profile show
+ai-debt profile setup
 ai-debt review
 ai-debt review --analysis-file result.json
 ai-debt review --action accept --candidate-id <candidate-id>

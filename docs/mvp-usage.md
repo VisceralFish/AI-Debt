@@ -10,6 +10,8 @@ ai-debt init claude-code
 ai-debt init codex
 ```
 
+`ai-debt init <adapter>` 会在 hook 初始化后为当前 cwd 的 project profile 做冷启动 setup。交互式终端会询问是否运行问卷；非交互运行或 `--no-profile-setup` 会写入默认 profile。已有 profile 不会被 init 覆盖。
+
 真实接入时，把 `~/.ai-debt/hooks/*-hook.ps1` 连接到对应 agent hook。fixture 测试时可直接调用：
 
 ```bash

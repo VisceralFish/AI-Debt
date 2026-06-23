@@ -26,6 +26,7 @@ _Avoid_: Vague topic, file name only
 
 **Ownership Profile**:
 A project-scoped configuration containing role, project intent, target ownership level, critical areas, unacceptable risks, and the control contract.
+Cold-start setup belongs here: `ai-debt init <adapter>` prepares the current cwd profile after adapter initialization, uses defaults when skipped or non-interactive, and never overwrites an existing profile without `ai-debt profile setup --force`.
 _Avoid_: Skill test, generic onboarding quiz
 
 **Control Contract**:

@@ -178,6 +178,76 @@ class OwnershipCoreTests(HomeTestCase):
         finally:
             conn.close()
 
+    def test_init_creates_default_project_profile_non_interactively(self) -> None:
+        project_id = project_id_for_cwd(str(Path.cwd()))
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(main(["init", "claude-code", "--no-profile-setup"]), 0)
+        text = output.getvalue()
+        self.assertIn("initialized claude-code adapter", text)
+        self.assertIn("ownership profile: default created", text)
+
+        conn = connect(db_path(self.home))
+        try:
+            row = conn.execute("SELECT payload_json FROM ownership_profiles WHERE project_id = ?", (project_id,)).fetchone()
+            self.assertIsNotNone(row)
+            profile = json.loads(row["payload_json"])
+            self.assertEqual(profile["role"], "independent_developer")
+            self.assertEqual(profile["target_ownership_level"], "L3")
+        finally:
+            conn.close()
+
+    def test_repeated_init_does_not_overwrite_existing_profile(self) -> None:
+        project_id = project_id_for_cwd(str(Path.cwd()))
+        with redirect_stdout(StringIO()):
+            self.assertEqual(main(["init", "codex", "--no-profile-setup"]), 0)
+        conn = connect(db_path(self.home))
+        try:
+            update_profile(conn, project_id, {"role": "tech_lead"})
+        finally:
+            conn.close()
+
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(main(["init", "codex", "--no-profile-setup"]), 0)
+        self.assertIn("ownership profile: already configured", output.getvalue())
+
+        conn = connect(db_path(self.home))
+        try:
+            profile = json.loads(conn.execute("SELECT payload_json FROM ownership_profiles WHERE project_id = ?", (project_id,)).fetchone()["payload_json"])
+            self.assertEqual(profile["role"], "tech_lead")
+        finally:
+            conn.close()
+
+    def test_profile_show_and_force_setup(self) -> None:
+        project_id = project_id_for_cwd(str(Path.cwd()))
+        missing_output = StringIO()
+        with redirect_stdout(missing_output):
+            self.assertEqual(main(["profile", "show"]), 0)
+        self.assertIn("ownership profile: not configured", missing_output.getvalue())
+
+        with redirect_stdout(StringIO()):
+            self.assertEqual(main(["profile", "setup"]), 0)
+        conn = connect(db_path(self.home))
+        try:
+            update_profile(conn, project_id, {"role": "tech_lead"})
+        finally:
+            conn.close()
+
+        show_output = StringIO()
+        with redirect_stdout(show_output):
+            self.assertEqual(main(["profile", "show"]), 0)
+        self.assertIn('"role": "tech_lead"', show_output.getvalue())
+
+        with redirect_stdout(StringIO()):
+            self.assertEqual(main(["profile", "setup", "--force"]), 0)
+        conn = connect(db_path(self.home))
+        try:
+            profile = json.loads(conn.execute("SELECT payload_json FROM ownership_profiles WHERE project_id = ?", (project_id,)).fetchone()["payload_json"])
+            self.assertEqual(profile["role"], "independent_developer")
+        finally:
+            conn.close()
+
     def test_session_end_creates_pending_review_window(self) -> None:
         window_id = self.capture_codex_window()
         conn = connect(db_path(self.home))

@@ -118,6 +118,21 @@ submit_ownership_analysis(review_window_id, analysis)
 
 Profile 是 project-scoped 配置。`project_id` 默认由 cwd hash 生成，MCP 参数可以覆盖。
 
+冷启动时，`ai-debt init <adapter>` 会在 adapter/hook 初始化完成后，为当前 cwd 对应的 project profile 执行 setup：
+
+```text
+交互式终端:
+  如果 profile 不存在，询问是否运行冷启动问卷
+  用户跳过时写入默认 profile
+
+非交互终端或 --no-profile-setup:
+  不等待输入，直接写入默认 profile
+
+已有 profile:
+  init 不重复问卷，不覆盖
+  修改必须显式运行 ai-debt profile setup --force
+```
+
 默认规则：
 
 ```text
@@ -146,6 +161,21 @@ project_id = "proj-" + sha256(normalized_cwd).hexdigest()[:12]
 ```
 
 第一版 profile 进入 review input，scoring 只轻度使用。
+
+冷启动问卷只采集当前 profile 结构中的字段，不新增 `learning_goals`：
+
+```text
+role
+project_intent
+target_ownership_level
+critical_areas
+unacceptable_risks
+control_contract.ai_free_to_handle
+control_contract.ai_must_explain
+control_contract.ai_must_confirm
+control_contract.user_must_own
+tech_familiarity: {tech_name: L0|L1|L2|L3|L4|L5}
+```
 
 ## 5. Ownership Debt Model
 
