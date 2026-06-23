@@ -71,7 +71,7 @@ idle_minutes: 15
 pending_minutes: 30
 ```
 
-无活动满 15 分钟后，下一次 `get_status` / `list_sessions` 会把 session 和 review window 标为 `idle_detected`。无活动满 30 分钟后，下一次刷新会把 session 标为 `pending_settlement`，并把 review window 标为 `pending_ownership_review`。
+无活动满 15 分钟后，下一次 `get_status` / `list_sessions` 会把 session 和 review window 标为 `idle_detected`。无活动满 30 分钟后，下一次刷新会把 session 标为 `pending_settlement`，并把 review window 标为 `pending_ownership_review`。如果运行了 `ai-debt companion`，它会把待处理 window 进一步标记为 `analysis_requested` 并提示用户让当前 agent 执行分析。
 
 如果 agent 没有发送 `SessionEnd`，且没有运行 `ai-debt companion`，推荐 MCP flow 是：
 
@@ -80,6 +80,7 @@ pending_minutes: 30
 2. get_status()
 3. get_pending_review_window()
 4. get_ownership_review_input(review_window_id)
+5. submit_ownership_analysis(review_window_id, analysis)
 ```
 
 ## Resources

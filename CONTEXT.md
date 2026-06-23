@@ -47,7 +47,7 @@ pending_minutes: 30
 ```
 
 After 15 inactive minutes, the session and current review window become `idle_detected`. After 30 inactive minutes, the session becomes `pending_settlement` and the review window becomes `pending_ownership_review`.
-`ai-debt companion` checks every 30 seconds and prints a one-time local reminder for new `pending_settlement` sessions; it does not generate review candidates.
+`ai-debt companion` checks every 30 seconds, marks each ready window as `analysis_requested`, and prints a one-time local reminder; it does not generate review candidates.
 _Avoid_: Presenting idle timeout as proof that the task truly ended
 
 **Build Journal**:

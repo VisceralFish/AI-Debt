@@ -26,6 +26,7 @@ from .ownership import (
     learn_one,
     list_ownership_debts,
     parse_ownership_analysis,
+    project_id_for_cwd,
     record_check,
     review_ownership_gap,
     select_pending_review_window,
@@ -203,10 +204,39 @@ def _hook(adapter: str) -> int:
     conn = connect(db_path())
     try:
         counts = status_counts(conn)
+        reminders = _analysis_reminders_for_event(conn, event)
     finally:
         conn.close()
     print(f"ai-debt: {event['type']} captured; pending_settlement={counts.get('pending_settlement', 0)}")
+    for reminder in reminders:
+        print(reminder)
     return 0
+
+
+def _analysis_reminders_for_event(conn, event: dict[str, object]) -> list[str]:
+    if event.get("type") != "session_started":
+        return []
+    project_id = project_id_for_cwd(str(event.get("cwd") or ""))
+    rows = conn.execute(
+        """
+        SELECT id
+        FROM ownership_review_windows
+        WHERE project_id = ?
+          AND status = 'analysis_requested'
+        ORDER BY updated_at DESC
+        LIMIT 3
+        """,
+        (project_id,),
+    ).fetchall()
+    if not rows:
+        return []
+    count = len(rows)
+    first = rows[0]["id"]
+    return [
+        f"AI Debt: {count} previous review window needs ownership analysis.",
+        f"run: ai-debt review {first}",
+        'or ask agent: "Analyze pending AI Debt review"',
+    ]
 
 
 def _review(review_window_id: str | None, analysis_file: str | None, action: str | None, candidate_id: str | None) -> int:
@@ -244,10 +274,57 @@ def _review(review_window_id: str | None, analysis_file: str | None, action: str
                 print(f"- {item['id']}: {item['status']}{reason_text}")
             return 0
 
-        print(json.dumps(build_ownership_review_input(conn, window["id"]), ensure_ascii=False, indent=2))
+        candidates = conn.execute(
+            """
+            SELECT id, title, summary, priority, status, gap_type
+            FROM ownership_gap_candidates
+            WHERE review_window_id = ?
+            ORDER BY priority ASC, created_at ASC
+            """,
+            (window["id"],),
+        ).fetchall()
+        if candidates:
+            _print_candidate_review_queue(window["id"], candidates)
+            return 0
+
+        review_input = build_ownership_review_input(conn, window["id"])
+        _print_analysis_needed(review_input)
         return 0
     finally:
         conn.close()
+
+
+def _print_analysis_needed(review_input: dict[str, object]) -> None:
+    window = review_input["review_window"]
+    session = review_input["session"]
+    event_count = len(review_input.get("event_summaries", []))
+    changed_count = len(review_input.get("changed_files", []))
+    window_id = window["id"]
+    print("AI Debt: ownership analysis needed")
+    print(f"window: {window_id}")
+    print(f"session: {session['id']}")
+    print(f"source: {session['source']}")
+    print(f"events: {event_count}")
+    print(f"changed files: {changed_count}")
+    print("")
+    print("Ask your current agent:")
+    print(f'"Analyze pending AI Debt review window {window_id} using the ai-debt MCP tools.')
+    print('Do not accept gaps automatically; submit candidates for my review."')
+    print("")
+    print("Expected MCP flow:")
+    print(f"- get_ownership_review_input(review_window_id=\"{window_id}\")")
+    print("- submit_ownership_analysis(...)")
+    print("")
+    print(f"Then run: ai-debt review {window_id}")
+
+
+def _print_candidate_review_queue(review_window_id: str, candidates: list[object]) -> None:
+    print("AI Debt: ownership candidates ready")
+    print(f"window: {review_window_id}")
+    for row in candidates:
+        print(f"- {row['id']} [{row['priority']}] {row['status']} {row['title']} ({row['gap_type']})")
+        print(f"  {row['summary']}")
+        print(f"  actions: ai-debt review {review_window_id} --candidate-id {row['id']} --action accept|ignore|already_know|defer")
 
 
 def _inbox() -> int:

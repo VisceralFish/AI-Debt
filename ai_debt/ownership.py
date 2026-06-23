@@ -171,7 +171,7 @@ def select_pending_review_window(conn: sqlite3.Connection, review_window_id: str
     return conn.execute(
         """
         SELECT * FROM ownership_review_windows
-        WHERE status IN ('pending_ownership_review', 'candidates_ready', 'analysis_submitted')
+        WHERE status IN ('pending_ownership_review', 'analysis_requested', 'candidates_ready', 'analysis_submitted')
         ORDER BY updated_at DESC
         LIMIT 1
         """

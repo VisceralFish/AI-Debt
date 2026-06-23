@@ -52,7 +52,7 @@ MCP list_sessions
 MCP record_event
 ```
 
-如果运行 `ai-debt companion`，它每 30 秒检查一次，发现新的 `pending_settlement` 后打印一次本地提醒，但不会自动调用 LLM 或生成 review candidates。未运行 companion 时，如果用户没有显式 Stop/SessionEnd，agent 或 MCP client 应在空闲后先调用 `get_status` 或 `list_sessions`，再调用 `get_pending_review_window`。
+如果运行 `ai-debt companion`，它每 30 秒检查一次，发现新的 pending review window 后标记为 `analysis_requested` 并打印一次本地提醒，但不会自动调用 LLM 或生成 review candidates。未运行 companion 时，如果用户没有显式 Stop/SessionEnd，agent 或 MCP client 应在空闲后先调用 `get_status` 或 `list_sessions`，再调用 `get_pending_review_window`。
 
 数据库丢失时会从 `journals/*/events.jsonl` 恢复 normalized events 和 review window。
 
@@ -63,6 +63,15 @@ MCP record_event
 ```bash
 ai-debt review
 ```
+
+当 window 还没有 candidates 时，`ai-debt review` 会显示 analysis-needed 指引，让用户要求当前 Claude Code / Codex agent 通过 MCP 执行：
+
+```text
+get_ownership_review_input(review_window_id)
+submit_ownership_analysis(...)
+```
+
+当 candidates 已生成后，`ai-debt review` 才显示 accept / ignore / already_know / defer 的候选审核队列。
 
 把当前 agent 生成的 ownership analysis JSON 保存为 `result.json` 后导入：
 

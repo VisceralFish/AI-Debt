@@ -138,7 +138,7 @@ def _select_export_window(conn: sqlite3.Connection, review_window_id: str | None
     return conn.execute(
         """
         SELECT * FROM ownership_review_windows
-        WHERE status IN ('candidates_ready', 'reviewed', 'analysis_submitted', 'pending_ownership_review')
+        WHERE status IN ('candidates_ready', 'reviewed', 'analysis_submitted', 'analysis_requested', 'pending_ownership_review')
            OR id IN (SELECT source_review_window_id FROM ownership_debts)
         ORDER BY updated_at DESC
         LIMIT 1

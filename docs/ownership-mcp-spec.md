@@ -44,6 +44,7 @@ Session 是采集容器，review window 是分析粒度。
 open
 idle_detected
 pending_ownership_review
+analysis_requested
 analysis_submitted
 candidates_ready
 reviewed
@@ -77,6 +78,10 @@ idle timeout / pending timeout:
   无活动 >= idle_minutes 时，当前 open window 进入 idle_detected
   无活动 >= pending_minutes 时，当前 open/idle window 进入 pending_ownership_review
 
+companion notification:
+  companion 发现 pending_ownership_review 后，将该 window 标记为 analysis_requested
+  companion 只提示用户让当前 agent 分析，不自动调用 LLM，不自动生成 candidates
+
 session_ended:
   当前 open window 进入 pending_ownership_review
 ```
@@ -96,11 +101,18 @@ MCP server 本身没有后台定时器。Idle / pending 状态可以 lazy 刷新
 MCP get_status / list_sessions 会刷新 session 和 review window 状态。
 MCP record_event 在记录事件后会刷新一次状态。
 CLI status / review 会刷新状态。
-CLI companion 每 30 秒主动刷新状态。
+CLI companion 每 30 秒主动刷新状态，并把待分析 window 标记为 analysis_requested 后打印本地提醒。
 get_pending_review_window 本身只读取当前状态，不主动刷新。
 ```
 
 因此，如果没有显式 `session_ended`，且没有运行 `ai-debt companion`，agent 或 MCP client 应在空闲后先调用 `get_status` 或 `list_sessions`，再调用 `get_pending_review_window`。
+
+`analysis_requested` 表示用户已经收到本地提醒，当前 agent 仍需显式执行：
+
+```text
+get_ownership_review_input(review_window_id)
+submit_ownership_analysis(review_window_id, analysis)
+```
 
 ## 4. Ownership Profile
 

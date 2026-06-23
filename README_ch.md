@@ -110,7 +110,7 @@ Idle timeout 可以 lazy 刷新，也可以由本地 companion watcher 主动刷
 ai-debt companion
 ```
 
-Companion 每 30 秒检查一次，把冷却完成的 session 推进到 `pending_settlement`，并只打印一次本地提醒让用户运行 `ai-debt review`。它不会自动调用 LLM，也不会自动生成 review candidates。
+Companion 每 30 秒检查一次，把冷却完成的 session 推进到 `pending_settlement`，把每个待处理 review window 标记为 `analysis_requested`，并只打印一次本地提醒。它不会自动调用 LLM，也不会自动生成 review candidates。运行 `ai-debt review` 可以查看待分析 window，并让当前 agent 通过 AI Debt MCP tools 完成分析。
 
 ## 隐私默认值
 

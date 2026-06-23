@@ -114,7 +114,7 @@ Idle timeout can be refreshed lazily or by the local companion watcher. Defaults
 ai-debt companion
 ```
 
-The companion checks every 30 seconds, promotes cooled sessions to `pending_settlement`, and prints a one-time local reminder to run `ai-debt review`. It does not call an LLM or generate review candidates automatically.
+The companion checks every 30 seconds, promotes cooled sessions to `pending_settlement`, marks each ready review window as `analysis_requested`, and prints a one-time local reminder. It does not call an LLM or generate review candidates automatically. Run `ai-debt review` to see the pending window and ask the current agent to analyze it through the AI Debt MCP tools.
 
 ## Privacy Defaults
 

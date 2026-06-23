@@ -21,6 +21,7 @@ PENDING_SETTLEMENT_EVENT = "pending_settlement"
 @dataclass(frozen=True)
 class CompanionNotification:
     session_id: str
+    review_window_id: str
     source: str
     last_activity_at: str
 
@@ -33,32 +34,48 @@ def collect_pending_notifications(
     refresh_session_states(conn, config, now)
     rows = conn.execute(
         """
-        SELECT id, source, last_activity_at
+        SELECT
+          sessions.id AS session_id,
+          sessions.source AS source,
+          sessions.last_activity_at AS last_activity_at,
+          ownership_review_windows.id AS review_window_id
         FROM sessions
-        WHERE status = 'pending_settlement'
+        JOIN ownership_review_windows ON ownership_review_windows.session_id = sessions.id
+        WHERE sessions.status = 'pending_settlement'
+          AND ownership_review_windows.status IN ('pending_ownership_review', 'analysis_requested')
           AND NOT EXISTS (
             SELECT 1
             FROM companion_notifications
             WHERE companion_notifications.session_id = sessions.id
-              AND companion_notifications.event_type = ?
+              AND companion_notifications.event_type = ? || ':' || ownership_review_windows.id
           )
-        ORDER BY last_activity_at DESC
+        ORDER BY sessions.last_activity_at DESC
         """,
         (PENDING_SETTLEMENT_EVENT,),
     ).fetchall()
     notified_at = _iso_utc(now)
     for row in rows:
+        event_type = f"{PENDING_SETTLEMENT_EVENT}:{row['review_window_id']}"
         conn.execute(
             """
             INSERT OR IGNORE INTO companion_notifications(session_id, event_type, notified_at)
             VALUES (?, ?, ?)
             """,
-            (row["id"], PENDING_SETTLEMENT_EVENT, notified_at),
+            (row["session_id"], event_type, notified_at),
+        )
+        conn.execute(
+            """
+            UPDATE ownership_review_windows
+            SET status = 'analysis_requested', updated_at = ?
+            WHERE id = ? AND status = 'pending_ownership_review'
+            """,
+            (notified_at, row["review_window_id"]),
         )
     conn.commit()
     return [
         CompanionNotification(
-            session_id=row["id"],
+            session_id=row["session_id"],
+            review_window_id=row["review_window_id"],
             source=row["source"],
             last_activity_at=row["last_activity_at"],
         )
@@ -97,10 +114,12 @@ def render_pending_bubble(notifications: list[CompanionNotification]) -> str:
     latest = notifications[0]
     session_label = "session" if len(notifications) == 1 else "sessions"
     lines = [
-        "AI Debt: review ready",
-        f"{len(notifications)} {session_label} entered pending_settlement",
+        "AI Debt: ownership analysis needed",
+        f"{len(notifications)} {session_label} has pending review work",
         f"latest: {latest.session_id} [{latest.source}]",
+        f"window: {latest.review_window_id}",
         "run: ai-debt review",
+        'or ask agent: "Analyze pending AI Debt review"',
     ]
     width = max(len(line) for line in lines)
     border = "+" + "-" * (width + 2) + "+"

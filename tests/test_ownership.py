@@ -4,7 +4,8 @@ import json
 import os
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from contextlib import redirect_stdout
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from io import StringIO
 from pathlib import Path
@@ -223,10 +224,51 @@ class OwnershipCoreTests(HomeTestCase):
         second = run_companion_once(self.home, datetime(2026, 6, 22, 0, 32, tzinfo=timezone.utc), second_output)
 
         self.assertEqual([item.session_id for item in first], ["companion-session"])
-        self.assertIn("AI Debt: review ready", output.getvalue())
+        self.assertIn("AI Debt: ownership analysis needed", output.getvalue())
         self.assertIn("run: ai-debt review", output.getvalue())
+        conn = connect(db_path(self.home))
+        try:
+            window = select_pending_review_window(conn)
+            self.assertEqual(window["status"], "analysis_requested")
+        finally:
+            conn.close()
         self.assertEqual(second, [])
         self.assertEqual(second_output.getvalue(), "")
+
+    def test_companion_notifies_each_review_window_in_same_session(self) -> None:
+        session_id = "multi-window-session"
+        start = datetime.now(timezone.utc).replace(microsecond=0)
+        first_tool = start + timedelta(minutes=1)
+        first_pending = first_tool + timedelta(minutes=30)
+        second_prompt = first_pending + timedelta(minutes=1)
+        second_tool = second_prompt + timedelta(minutes=1)
+        second_pending = second_tool + timedelta(minutes=31)
+        capture_payload(
+            "codex",
+            {"event": "SessionStart", "session_id": session_id, "cwd": str(self.home), "timestamp": _iso(start)},
+            self.home,
+        )
+        capture_payload(
+            "codex",
+            {"event": "PostToolUse", "session_id": session_id, "tool_name": "apply_patch", "summary": "First change", "timestamp": _iso(first_tool)},
+            self.home,
+        )
+        first = run_companion_once(self.home, first_pending, StringIO())
+        capture_payload(
+            "codex",
+            {"event": "UserPromptSubmit", "session_id": session_id, "input": "Continue work", "timestamp": _iso(second_prompt)},
+            self.home,
+        )
+        capture_payload(
+            "codex",
+            {"event": "PostToolUse", "session_id": session_id, "tool_name": "apply_patch", "summary": "Second change", "timestamp": _iso(second_tool)},
+            self.home,
+        )
+        second = run_companion_once(self.home, second_pending, StringIO())
+
+        self.assertEqual(len(first), 1)
+        self.assertEqual(len(second), 1)
+        self.assertNotEqual(first[0].review_window_id, second[0].review_window_id)
 
     def test_analysis_creates_candidates_and_accept_indexes_concepts(self) -> None:
         window_id = self.capture_codex_window()
@@ -316,6 +358,30 @@ class OwnershipCoreTests(HomeTestCase):
         self.assertEqual(main(["review", window_id, "--analysis-file", str(bad_path)]), 1)
         failed_logs = list((self.home / "logs").glob("review_analysis_failed_*.txt"))
         self.assertEqual(len(failed_logs), 1)
+
+    def test_review_without_candidates_shows_analysis_guidance(self) -> None:
+        window_id = self.capture_codex_window("analysis-guidance-session")
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(main(["review", window_id]), 0)
+        text = output.getvalue()
+        self.assertIn("AI Debt: ownership analysis needed", text)
+        self.assertIn(f"get_ownership_review_input(review_window_id=\"{window_id}\")", text)
+        self.assertNotIn('"expected_output_schema"', text)
+
+    def test_review_with_candidates_shows_action_queue(self) -> None:
+        window_id = self.capture_codex_window("candidate-guidance-session")
+        conn = connect(db_path(self.home))
+        try:
+            create_ownership_candidates(conn, window_id, self.ownership_analysis(include_rejected=False))
+        finally:
+            conn.close()
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(main(["review", window_id]), 0)
+        text = output.getvalue()
+        self.assertIn("AI Debt: ownership candidates ready", text)
+        self.assertIn("--action accept|ignore|already_know|defer", text)
 
     def test_doctor_does_not_create_state_on_empty_home(self) -> None:
         self.assertEqual(main(["doctor"]), 1)
@@ -411,6 +477,9 @@ class OwnershipMcpTests(HomeTestCase):
         debt_id = mcp_server.call_tool("review_ownership_gap", {"candidate_id": "cand-delete-mcp", "action": "accept"})["debt_id"]
         self.assertTrue(mcp_server.call_tool("delete_item", {"target": "debt", "id": debt_id})["deleted"])
         self.assertTrue(mcp_server.call_tool("delete_item", {"target": "session", "id": "delete-mcp-flow"})["deleted"])
+
+def _iso(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 if __name__ == "__main__":
