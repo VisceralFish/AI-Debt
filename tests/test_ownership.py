@@ -9,16 +9,18 @@ from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 from ai_debt import mcp_server
 from ai_debt.cli import main
-from ai_debt.companion import run_companion_once
+from ai_debt.companion import codex_tui_hook_output, run_companion_once
 from ai_debt.config import default_config
 from ai_debt.core import capture_payload
 from ai_debt.maintenance import cleanup_raw_payloads, delete_debt, delete_session, export_task_control_report, schema_is_valid
 from ai_debt.ownership import (
     build_ownership_review_input,
     create_ownership_candidates,
+    default_profile,
     get_or_create_profile,
     learn_one,
     list_ownership_debts,
@@ -30,6 +32,8 @@ from ai_debt.ownership import (
     update_profile,
 )
 from ai_debt.paths import db_path
+from ai_debt.hooks import CODEX_TUI_HOOK_COMMAND, write_codex_tui_hooks
+from ai_debt.profile_setup import collect_profile_answers
 from ai_debt.schema import connect, migrate
 from ai_debt.store import refresh_session_states, status_counts
 
@@ -199,8 +203,10 @@ class OwnershipCoreTests(HomeTestCase):
 
     def test_repeated_init_does_not_overwrite_existing_profile(self) -> None:
         project_id = project_id_for_cwd(str(Path.cwd()))
-        with redirect_stdout(StringIO()):
-            self.assertEqual(main(["init", "codex", "--no-profile-setup"]), 0)
+        with patch("ai_debt.cli.write_codex_tui_hooks") as write_tui_hooks:
+            write_tui_hooks.return_value = Path.cwd() / ".codex" / "hooks.json"
+            with redirect_stdout(StringIO()):
+                self.assertEqual(main(["init", "codex", "--no-profile-setup"]), 0)
         conn = connect(db_path(self.home))
         try:
             update_profile(conn, project_id, {"role": "tech_lead"})
@@ -208,9 +214,13 @@ class OwnershipCoreTests(HomeTestCase):
             conn.close()
 
         output = StringIO()
-        with redirect_stdout(output):
-            self.assertEqual(main(["init", "codex", "--no-profile-setup"]), 0)
+        with patch("ai_debt.cli.write_codex_tui_hooks") as write_tui_hooks:
+            write_tui_hooks.return_value = Path.cwd() / ".codex" / "hooks.json"
+            with redirect_stdout(output):
+                self.assertEqual(main(["init", "codex", "--no-profile-setup"]), 0)
+            write_tui_hooks.assert_called_once_with()
         self.assertIn("ownership profile: already configured", output.getvalue())
+        self.assertIn("run /hooks to review and trust", output.getvalue())
 
         conn = connect(db_path(self.home))
         try:
@@ -218,6 +228,71 @@ class OwnershipCoreTests(HomeTestCase):
             self.assertEqual(profile["role"], "tech_lead")
         finally:
             conn.close()
+
+    def test_init_profile_setup_forces_existing_profile_questionnaire(self) -> None:
+        project_id = project_id_for_cwd(str(Path.cwd()))
+        conn = connect(db_path(self.home))
+        try:
+            migrate(conn)
+            get_or_create_profile(conn, project_id)
+            update_profile(conn, project_id, {"role": "tech_lead"})
+        finally:
+            conn.close()
+
+        with patch("ai_debt.cli.sys.stdin.isatty", return_value=True):
+            with patch("ai_debt.cli.setup_project_profile") as setup_profile:
+                setup_profile.return_value = (
+                    {**default_profile(project_id), "role": "independent_developer"},
+                    True,
+                )
+                with patch("ai_debt.cli.write_codex_tui_hooks") as write_tui_hooks:
+                    write_tui_hooks.return_value = Path.cwd() / ".codex" / "hooks.json"
+                    with redirect_stdout(StringIO()):
+                        self.assertEqual(main(["init", "codex", "--profile-setup"]), 0)
+
+        self.assertTrue(setup_profile.call_args.kwargs["force"])
+        self.assertTrue(setup_profile.call_args.kwargs["interactive"])
+
+    def test_codex_tui_hooks_merge_with_existing_project_hooks(self) -> None:
+        codex_dir = self.home / ".codex"
+        codex_dir.mkdir()
+        path = codex_dir / "hooks.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {
+                                "hooks": [
+                                    {"type": "command", "command": "other-tool stop"}
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        written = write_codex_tui_hooks(self.home)
+        document = json.loads(written.read_text(encoding="utf-8"))
+
+        self.assertEqual(written, path)
+        self.assertEqual(
+            document["hooks"]["Stop"][0]["hooks"][0]["command"],
+            "other-tool stop",
+        )
+        for event_name in ("SessionStart", "UserPromptSubmit", "Stop"):
+            commands = [
+                handler["command"]
+                for entry in document["hooks"][event_name]
+                for handler in entry["hooks"]
+            ]
+            self.assertEqual(commands.count(CODEX_TUI_HOOK_COMMAND), 1)
+
+        write_codex_tui_hooks(self.home)
+        repeated = json.loads(written.read_text(encoding="utf-8"))
+        self.assertEqual(repeated, document)
 
     def test_profile_show_and_force_setup(self) -> None:
         project_id = project_id_for_cwd(str(Path.cwd()))
@@ -247,6 +322,43 @@ class OwnershipCoreTests(HomeTestCase):
             self.assertEqual(profile["role"], "independent_developer")
         finally:
             conn.close()
+
+    def test_profile_questionnaire_uses_chinese_explanatory_labels(self) -> None:
+        output = StringIO()
+        answers = StringIO("\n\n\n\n\n\ny\n\n\n\n\nReact=L3, SQLite=L2\n")
+        profile = collect_profile_answers(default_profile("proj-test"), answers, output)
+        text = output.getvalue()
+
+        self.assertIn("Language / 语言", text)
+        self.assertIn("为当前项目设置 Ownership Profile", text)
+        self.assertIn("独立开发者 - 一个人负责需求、代码、验证和维护", text)
+        self.assertIn("线上产品/生产应用 - 面向真实用户", text)
+        self.assertIn("L3 能独立维护 - 能定位问题", text)
+        self.assertIn("AI 必须先解释", text)
+        self.assertIn("L4 能设计取舍并审查方案", text)
+        self.assertEqual(profile["language"], "zh")
+        self.assertEqual(profile["role"], "independent_developer")
+        self.assertEqual(profile["target_ownership_level"], "L3")
+        self.assertEqual(profile["tech_familiarity"], {"React": "L3", "SQLite": "L2"})
+
+    def test_profile_questionnaire_supports_english(self) -> None:
+        output = StringIO()
+        answers = StringIO("2\n2\n2\n3\nauth, payment\nsecurity_regression\ny\nformatting\narchitecture\nnew dependency\nproduct direction\nFastAPI=L2\n")
+        profile = collect_profile_answers(default_profile("proj-test"), answers, output)
+        text = output.getvalue()
+
+        self.assertIn("Language / 语言", text)
+        self.assertIn("Set up the Ownership Profile for this project.", text)
+        self.assertIn("Tech lead - you own design direction", text)
+        self.assertIn("Production app - real users", text)
+        self.assertIn("L4 make design tradeoffs", text)
+        self.assertIn("AI must explain first", text)
+        self.assertEqual(profile["language"], "en")
+        self.assertEqual(profile["role"], "tech_lead")
+        self.assertEqual(profile["project_intent"], "production_app")
+        self.assertEqual(profile["target_ownership_level"], "L4")
+        self.assertEqual(profile["critical_areas"], ["auth", "payment"])
+        self.assertEqual(profile["tech_familiarity"], {"FastAPI": "L2"})
 
     def test_session_end_creates_pending_review_window(self) -> None:
         window_id = self.capture_codex_window()
@@ -339,6 +451,63 @@ class OwnershipCoreTests(HomeTestCase):
         self.assertEqual(len(first), 1)
         self.assertEqual(len(second), 1)
         self.assertNotEqual(first[0].review_window_id, second[0].review_window_id)
+
+    def test_codex_tui_hook_surfaces_pending_review_as_system_message(self) -> None:
+        session_id = "tui-session"
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        started_at = now - timedelta(minutes=31)
+        capture_payload(
+            "codex",
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": session_id,
+                "cwd": str(self.home),
+                "timestamp": _iso(started_at),
+            },
+            self.home,
+        )
+        result = codex_tui_hook_output(
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "session_id": session_id,
+                "turn_id": "turn-2",
+                "cwd": str(self.home),
+                "prompt": "Continue",
+                "timestamp": _iso(now),
+            },
+            self.home,
+            now,
+        )
+
+        self.assertTrue(result["continue"])
+        self.assertIn("等待分析", result["systemMessage"])
+        self.assertIn("ai-debt review", result["systemMessage"])
+        conn = connect(db_path(self.home))
+        try:
+            statuses = [
+                row["status"]
+                for row in conn.execute(
+                    "SELECT status FROM ownership_review_windows WHERE session_id = ?",
+                    (session_id,),
+                ).fetchall()
+            ]
+            self.assertIn("analysis_requested", statuses)
+        finally:
+            conn.close()
+
+        repeated = codex_tui_hook_output(
+            {
+                "hook_event_name": "Stop",
+                "session_id": session_id,
+                "turn_id": "turn-2",
+                "cwd": str(self.home),
+                "last_assistant_message": "Done",
+                "timestamp": _iso(now + timedelta(minutes=1)),
+            },
+            self.home,
+            now + timedelta(minutes=1),
+        )
+        self.assertEqual(repeated, {})
 
     def test_analysis_creates_candidates_and_accept_indexes_concepts(self) -> None:
         window_id = self.capture_codex_window()

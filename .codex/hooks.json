@@ -1,0 +1,41 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ai-debt codex-tui-hook",
+            "timeout": 10,
+            "statusMessage": "AI Debt: checking review state"
+          }
+        ],
+        "matcher": "startup|resume|clear|compact"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ai-debt codex-tui-hook",
+            "timeout": 10,
+            "statusMessage": "AI Debt: checking review state"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ai-debt codex-tui-hook",
+            "timeout": 10,
+            "statusMessage": "AI Debt: checking review state"
+          }
+        ]
+      }
+    ]
+  }
+}

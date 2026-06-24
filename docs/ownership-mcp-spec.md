@@ -101,7 +101,7 @@ MCP server 本身没有后台定时器。Idle / pending 状态可以 lazy 刷新
 MCP get_status / list_sessions 会刷新 session 和 review window 状态。
 MCP record_event 在记录事件后会刷新一次状态。
 CLI status / review 会刷新状态。
-CLI companion 每 30 秒主动刷新状态，并把待分析 window 标记为 analysis_requested 后打印本地提醒。
+CLI companion 每 30 秒主动刷新状态，并把待分析 window 标记为 analysis_requested 后打印本地提醒。`ai-debt init codex` 还会默认生成项目级 `.codex/hooks.json`，在 `SessionStart`、`UserPromptSubmit` 和 `Stop` 时执行同一检查；发现 pending window 时通过 Codex hook `systemMessage` 在 TUI 内显示 warning。首次启用或 hook 内容变更后，用户需要重启 Codex 并在 `/hooks` 中审查和信任。
 get_pending_review_window 本身只读取当前状态，不主动刷新。
 ```
 
@@ -145,6 +145,7 @@ project_id = "proj-" + sha256(normalized_cwd).hexdigest()[:12]
 ```json
 {
   "project_id": "proj-...",
+  "language": "zh",
   "role": "independent_developer",
   "project_intent": "local_first_tool",
   "target_ownership_level": "L3",
@@ -165,6 +166,7 @@ project_id = "proj-" + sha256(normalized_cwd).hexdigest()[:12]
 冷启动问卷只采集当前 profile 结构中的字段，不新增 `learning_goals`：
 
 ```text
+language: zh|en
 role
 project_intent
 target_ownership_level
@@ -176,6 +178,8 @@ control_contract.ai_must_confirm
 control_contract.user_must_own
 tech_familiarity: {tech_name: L0|L1|L2|L3|L4|L5}
 ```
+
+问卷第一题选择展示语言，支持中文和英文。问卷展示层使用对应语言的问题、具体场景化选项和简短解释；持久化层仍保存上面这些稳定字段和枚举值，避免破坏 MCP/JSON contract。
 
 ## 5. Ownership Debt Model
 

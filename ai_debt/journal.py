@@ -81,7 +81,16 @@ def _write_snapshots(event: AgentEvent, root: Path) -> None:
 
 def _run_git(args: list[str], cwd: Path) -> str | None:
     try:
-        result = subprocess.run(args, cwd=cwd, text=True, capture_output=True, timeout=5, check=False)
+        result = subprocess.run(
+            args,
+            cwd=cwd,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
     except (OSError, subprocess.SubprocessError):
         return None
     if result.returncode != 0:

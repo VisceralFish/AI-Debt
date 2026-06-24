@@ -48,6 +48,7 @@ def project_id_for_cwd(cwd: str | None) -> str:
 def default_profile(project_id: str) -> dict[str, Any]:
     return {
         "project_id": project_id,
+        "language": "zh",
         "role": "independent_developer",
         "project_intent": "local_first_tool",
         "target_ownership_level": "L3",

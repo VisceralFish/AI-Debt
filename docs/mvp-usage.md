@@ -10,9 +10,11 @@ ai-debt init claude-code
 ai-debt init codex
 ```
 
-`ai-debt init <adapter>` 会在 hook 初始化后为当前 cwd 的 project profile 做冷启动 setup。交互式终端会询问是否运行问卷；非交互运行或 `--no-profile-setup` 会写入默认 profile。已有 profile 不会被 init 覆盖。
+`ai-debt init <adapter>` 会在 hook 初始化后为当前 cwd 的 project profile 做冷启动 setup。交互式终端会询问是否运行问卷；非交互运行或 `--no-profile-setup` 会写入默认 profile。已有 profile 默认不会被 init 覆盖；使用 `--profile-setup` 可从 init 入口强制重跑问卷。
 
-真实接入时，把 `~/.ai-debt/hooks/*-hook.ps1` 连接到对应 agent hook。fixture 测试时可直接调用：
+Codex 接入时，`ai-debt init codex` 会默认生成当前项目的 `.codex/hooks.json`，在 `SessionStart`、`UserPromptSubmit` 和 `Stop` 时检查 review 状态。重启 Codex 后使用 `/hooks` 审查并信任这些 hooks；发现 pending review 时，Codex TUI 会显示内部 warning，不需要 Windows Toast 或独立 Companion 窗口。
+
+Claude Code 接入或 fixture 测试时，也可以直接调用生成的 PowerShell hook：
 
 ```bash
 ai-debt hook codex
@@ -54,7 +56,7 @@ MCP list_sessions
 MCP record_event
 ```
 
-如果运行 `ai-debt companion`，它每 30 秒检查一次，发现新的 pending review window 后标记为 `analysis_requested` 并打印一次本地提醒，但不会自动调用 LLM 或生成 review candidates。未运行 companion 时，如果用户没有显式 Stop/SessionEnd，agent 或 MCP client 应在空闲后先调用 `get_status` 或 `list_sessions`，再调用 `get_pending_review_window`。
+Codex TUI hooks 会在会话启动、提交新提示或回合结束时检查一次，发现新的 pending review window 后标记为 `analysis_requested` 并显示一次 TUI warning，但不会自动调用 LLM 或生成 review candidates。Codex 当前没有可由项目自定义命令持续刷新的 `statusLine`，所以用户完全不操作时不会按 30 秒刷新；需要这种独立轮询行为时仍可手动运行 `ai-debt companion`。
 
 数据库丢失时会从 `journals/*/events.jsonl` 恢复 normalized events 和 review window。
 

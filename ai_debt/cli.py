@@ -5,10 +5,10 @@ import json
 import sys
 from pathlib import Path
 
-from .companion import COMPANION_POLL_SECONDS, run_companion_loop, run_companion_once
+from .companion import COMPANION_POLL_SECONDS, codex_tui_hook_output, run_companion_loop, run_companion_once
 from .config import load_config, mark_adapter
 from .core import capture_payload, initialize, read_json_stdin
-from .hooks import write_hook_script
+from .hooks import write_codex_tui_hooks, write_hook_script
 from .journal import utc_now
 from .paths import config_path, db_path, hooks_path, journals_path, logs_path, state_home
 from .maintenance import (
@@ -60,6 +60,7 @@ def main(argv: list[str] | None = None) -> int:
 
     hook_parser = subparsers.add_parser("hook")
     hook_parser.add_argument("adapter", choices=["claude-code", "codex"])
+    subparsers.add_parser("codex-tui-hook")
 
     review_parser = subparsers.add_parser("review")
     review_parser.add_argument("review_window_id", nargs="?")
@@ -108,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
             return _companion(args.once)
         if args.command == "hook":
             return _hook(args.adapter)
+        if args.command == "codex-tui-hook":
+            return _codex_tui_hook()
         if args.command == "review":
             return _review(args.review_window_id, args.analysis_file, args.action, args.candidate_id)
         if args.command == "inbox":
@@ -135,6 +138,10 @@ def _init(adapter: str | None, force_profile_setup: bool = False, no_profile_set
         hook_path = write_hook_script(adapter)
         print(f"initialized {adapter} adapter")
         print(f"hook script: {hook_path}")
+        if adapter == "codex":
+            codex_hooks_path = write_codex_tui_hooks()
+            print(f"Codex TUI hooks: {codex_hooks_path}")
+            print("restart Codex, then run /hooks to review and trust the AI Debt hooks")
         _setup_profile_for_init(force_profile_setup, no_profile_setup)
         return 0
     print(f"initialized AI Debt state at {state_home()}")
@@ -147,18 +154,18 @@ def _setup_profile_for_init(force_profile_setup: bool, no_profile_setup: bool) -
     project_id = project_id_for_cwd(cwd)
     try:
         migrate(conn)
-        if profile_exists(conn, project_id):
+        if profile_exists(conn, project_id) and not force_profile_setup:
             print(f"ownership profile: already configured for {project_id}")
             print("run: ai-debt profile setup --force")
             return
         interactive = bool(force_profile_setup and sys.stdin.isatty())
         if not force_profile_setup and not no_profile_setup and sys.stdin.isatty():
-            answer = _prompt_line("Ownership profile for this project is not set up. Set it up now? [Y/n]: ").strip().lower()
-            interactive = answer not in {"n", "no"}
+            answer = _prompt_line("Run cold-start questionnaire for this project now? / 当前项目还没有 Ownership Profile，现在运行冷启动问卷吗？[Y/n]: ").strip().lower()
+            interactive = answer not in {"n", "no", "否", "不用"}
         profile, created = setup_project_profile(
             conn,
             cwd,
-            force=False,
+            force=force_profile_setup,
             interactive=interactive,
             input_stream=sys.stdin,
             output=sys.stdout,
@@ -302,6 +309,13 @@ def _hook(adapter: str) -> int:
     print(f"ai-debt: {event['type']} captured; pending_settlement={counts.get('pending_settlement', 0)}")
     for reminder in reminders:
         print(reminder)
+    return 0
+
+
+def _codex_tui_hook() -> int:
+    payload = read_json_stdin(sys.stdin.read())
+    result = codex_tui_hook_output(payload)
+    print(json.dumps(result, ensure_ascii=False))
     return 0
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -30,6 +31,7 @@ def collect_pending_notifications(
     conn: sqlite3.Connection,
     config: AppConfig,
     now: datetime | None = None,
+    project_id: str | None = None,
 ) -> list[CompanionNotification]:
     refresh_session_states(conn, config, now)
     rows = conn.execute(
@@ -42,6 +44,7 @@ def collect_pending_notifications(
         FROM sessions
         JOIN ownership_review_windows ON ownership_review_windows.session_id = sessions.id
         WHERE sessions.status = 'pending_settlement'
+          AND (? IS NULL OR sessions.project_id = ?)
           AND ownership_review_windows.status IN ('pending_ownership_review', 'analysis_requested')
           AND NOT EXISTS (
             SELECT 1
@@ -51,7 +54,7 @@ def collect_pending_notifications(
           )
         ORDER BY sessions.last_activity_at DESC
         """,
-        (PENDING_SETTLEMENT_EVENT,),
+        (project_id, project_id, PENDING_SETTLEMENT_EVENT),
     ).fetchall()
     notified_at = _iso_utc(now)
     for row in rows:
@@ -127,8 +130,68 @@ def render_pending_bubble(notifications: list[CompanionNotification]) -> str:
     return "\n".join([border, *body, border])
 
 
+def render_codex_tui_message(notifications: list[CompanionNotification], language: str = "zh") -> str:
+    latest = notifications[0]
+    if language == "en":
+        return (
+            f"AI Debt: {len(notifications)} ownership review window(s) need analysis. "
+            f"Latest: {latest.review_window_id}. Run `ai-debt review {latest.review_window_id}` "
+            'or ask Codex: "Analyze pending AI Debt review".'
+        )
+    return (
+        f"AI Debt：有 {len(notifications)} 个 Ownership Review Window 等待分析。"
+        f"最新：{latest.review_window_id}。运行 `ai-debt review {latest.review_window_id}`，"
+        "或直接让 Codex“分析待处理的 AI Debt review”。"
+    )
+
+
+def codex_tui_hook_output(
+    payload: dict[str, object],
+    home: Path | None = None,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    from .core import capture_payload
+    from .ownership import project_id_for_cwd
+
+    initialize(home)
+    project_id = project_id_for_cwd(str(payload.get("cwd") or Path.cwd()))
+    conn = connect(db_path(home))
+    try:
+        migrate(conn)
+        notifications = collect_pending_notifications(
+            conn,
+            load_config(home),
+            now,
+            project_id=project_id,
+        )
+        language = _project_language(conn, project_id)
+    finally:
+        conn.close()
+    capture_payload("codex", payload, home)
+    if not notifications:
+        return {}
+    return {
+        "continue": True,
+        "systemMessage": render_codex_tui_message(notifications, language),
+    }
+
+
 def _iso_utc(value: datetime | None) -> str:
     current = value or datetime.now(timezone.utc)
     if current.tzinfo is None:
         current = current.replace(tzinfo=timezone.utc)
     return current.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _project_language(conn: sqlite3.Connection, project_id: str) -> str:
+    row = conn.execute(
+        "SELECT payload_json FROM ownership_profiles WHERE project_id = ?",
+        (project_id,),
+    ).fetchone()
+    if row is None:
+        return "zh"
+    try:
+        profile = json.loads(row["payload_json"])
+    except (json.JSONDecodeError, TypeError):
+        return "zh"
+    return "en" if profile.get("language") == "en" else "zh"

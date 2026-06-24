@@ -50,7 +50,7 @@ def normalize_codex_payload(payload: dict[str, Any], raw_payload_ref: str) -> di
         return {
             **base,
             "type": "assistant_stopped",
-            "last_message_summary": summarize(first_value(payload, "last_message", "message", "response")),
+            "last_message_summary": summarize(first_value(payload, "last_assistant_message", "last_message", "message", "response")),
         }
     if name in {"sessionend", "session_end", "session_ended"}:
         return {**base, "type": "session_ended"}
